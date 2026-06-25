@@ -8,6 +8,17 @@ This package keeps Trellis task/spec/workflow context injection in Pi, but uses 
 
 First-pass package shape for local path validation and GitHub install. It is **not** published to the npm registry.
 
+## Upstream baseline
+
+This project is adapted from [`mindfold-ai/Trellis`](https://github.com/mindfold-ai/Trellis). The current upstream baseline is recorded in `package.json` under `trellisUpstream`:
+
+- Repository: `https://github.com/mindfold-ai/Trellis.git`
+- Tag: [`v0.6.4`](https://github.com/mindfold-ai/Trellis/tree/v0.6.4)
+- Version: `0.6.4`
+- Recorded at: `2026-06-25`
+
+When upstream changes, compare the new upstream tag range from this baseline, analyze which changes still apply to the Pi-only package boundary, and selectively port the relevant updates instead of merging blindly.
+
 ## Requirements
 
 1. Pi Agent installed.

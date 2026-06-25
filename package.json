@@ -16,6 +16,14 @@
     "type": "git",
     "url": "https://github.com/jinuxx/pi-trellis.git"
   },
+  "trellisUpstream": {
+    "type": "git",
+    "url": "https://github.com/mindfold-ai/Trellis.git",
+    "tag": "v0.6.4",
+    "version": "0.6.4",
+    "recordedAt": "2026-06-25",
+    "purpose": "Track the upstream Trellis tag baseline so future upstream updates can be reviewed and selectively ported into this Pi-only package."
+  },
   "pi": {
     "extensions": [
       "./index.ts"
