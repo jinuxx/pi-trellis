@@ -1,0 +1,6 @@
+# Pi project-specific runtime files (not part of the package)
+.pi/
+.trellis/
+
+# Node
+node_modules/

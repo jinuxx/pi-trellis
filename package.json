@@ -1,0 +1,33 @@
+{
+  "name": "pi-trellis",
+  "version": "0.1.0",
+  "description": "Pi-only Trellis workflow package using pi-supergsd visible task branches.",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi-agent",
+    "trellis",
+    "workflow",
+    "task-branch"
+  ],
+  "license": "UNLICENSED",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jinuxx/pi-trellis.git"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ],
+    "prompts": [
+      "./prompts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}
