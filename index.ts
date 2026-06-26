@@ -21,6 +21,10 @@ type TrellisAgent = "trellis-implement" | "trellis-check" | "trellis-research";
 // ── Constants ─────────────────────────────────────────────────────────
 const PACKAGE_ROOT = dirname(fileURLToPath(import.meta.url));
 const SESSION_OVERVIEW_TIMEOUT_MS = 1500;
+const FIRST_REPLY_NOTICE = `<first-reply-notice>
+First visible reply: say once in Chinese that Trellis SessionStart context is loaded, then answer directly.
+This notice is one-shot: do not repeat it after the first assistant reply in the same session.
+</first-reply-notice>`;
 const TRELLIS_AGENT_JSONL: Record<string, string> = {
   "trellis-implement": "implement.jsonl",
   implement: "implement.jsonl",
@@ -261,12 +265,12 @@ function workflowBreadcrumb(root: string, key: string | null): string {
   return `<workflow-state>\n${header}\n${body}\n</workflow-state>`;
 }
 
-function sessionOverview(root: string, key: string | null): string {
+function runContextScript(root: string, key: string | null, args: string[]): string {
   const script = join(root, ".trellis", "scripts", "get_context.py");
   if (!exists(script)) return "";
   try {
     const py = process.platform === "win32" ? "python" : "python3";
-    const result = spawnSync(py, [script], {
+    const result = spawnSync(py, [script, ...args], {
       cwd: root,
       env: key ? { ...process.env, TRELLIS_CONTEXT_ID: key } : process.env,
       encoding: "utf-8",
@@ -274,11 +278,33 @@ function sessionOverview(root: string, key: string | null): string {
       windowsHide: true,
     });
     if (result.status !== 0) return "";
-    const stdout = (result.stdout ?? "").trim();
-    return stdout ? `<session-overview>\n${stdout}\n</session-overview>` : "";
+    return (result.stdout ?? "").trim();
   } catch {
     return "";
   }
+}
+
+function sessionOverview(root: string, key: string | null): string {
+  const stdout = runContextScript(root, key, []);
+  return stdout ? `<session-overview>\n${stdout}\n</session-overview>` : "";
+}
+
+function workflowOverview(root: string, key: string | null): string {
+  const stdout = runContextScript(root, key, ["--mode", "phase", "--platform", "pi"]);
+  return stdout ? `<trellis-workflow>\n${stdout}\n</trellis-workflow>` : "";
+}
+
+function buildStartupContext(root: string, key: string | null, overview: string): string {
+  const workflow = workflowOverview(root, key);
+  return [
+    "<session-context>\nTrellis compact SessionStart context. Use it to orient the session; load details on demand.\n</session-context>",
+    FIRST_REPLY_NOTICE,
+    overview,
+    workflow,
+    "<ready>\nUse the current workflow state to decide whether to create, continue, or skip a Trellis task.\n</ready>",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function branchTaskGuidance(root: string, key: string | null): string {
@@ -351,10 +377,21 @@ export default function trellisExtension(pi: {
     return turnCache;
   };
 
+  const startupKeys = new Set<string>();
+  const getStartupContext = (
+    key: string | null,
+    turn: { overview: string },
+  ): string => {
+    const cacheKey = key ?? "default";
+    if (startupKeys.has(cacheKey)) return "";
+    startupKeys.add(cacheKey);
+    return buildStartupContext(root, key, turn.overview);
+  };
+
   pi.on?.("session_start", (event, ctx) => {
     getKey(event, ctx);
     ctx?.ui?.notify?.(
-      "Trellis Pi-only context is available. Use /trellis-continue to resume; queue branch work with pi-supergsd push-task.",
+      "Trellis Pi-only context is available. Use /trellis-start to bootstrap, /trellis-continue to resume, and pi-supergsd push-task for branch work.",
       "info",
     );
   });
@@ -372,12 +409,29 @@ export default function trellisExtension(pi: {
     }
   });
 
+  pi.on?.("input", (event, ctx) => {
+    const key = getKey(event, ctx);
+    const ev = event as { text?: string };
+    if (typeof ev.text !== "string" || !ev.text.trim()) {
+      return { action: "continue" };
+    }
+    const { workflow, overview } = getTurnContext(key);
+    const injection = [workflow, overview].filter(Boolean).join("\n\n");
+    if (!injection) return { action: "continue" };
+    return {
+      action: "transform",
+      text: [ev.text, injection].join("\n\n"),
+    };
+  });
+
   pi.on?.("before_agent_start", (event, ctx) => {
     const key = getKey(event, ctx);
     const cur = (event as { systemPrompt?: string }).systemPrompt ?? "";
-    const { implementContext, workflow, overview, guidance } = getTurnContext(key);
+    const turn = getTurnContext(key);
+    const startup = getStartupContext(key, turn);
+    const { implementContext, workflow, overview, guidance } = turn;
     return {
-      systemPrompt: [cur, implementContext, workflow, overview, guidance]
+      systemPrompt: [cur, startup, implementContext, workflow, overview, guidance]
         .filter(Boolean)
         .join("\n\n"),
     };
