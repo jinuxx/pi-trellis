@@ -13,9 +13,10 @@ First-pass package shape for local path validation and GitHub install. It is **n
 This project is adapted from [`mindfold-ai/Trellis`](https://github.com/mindfold-ai/Trellis). The current upstream baseline is recorded in `package.json` under `trellisUpstream`:
 
 - Repository: `https://github.com/mindfold-ai/Trellis.git`
-- Tag: [`v0.6.5`](https://github.com/mindfold-ai/Trellis/tree/v0.6.5)
-- Version: `0.6.5`
-- Recorded at: `2026-06-25`
+- Package version: `0.6.6` (kept aligned with the upstream baseline)
+- Tag: [`v0.6.6`](https://github.com/mindfold-ai/Trellis/tree/v0.6.6)
+- Upstream version: `0.6.6`
+- Recorded at: `2026-07-13`
 
 When upstream changes, compare the new upstream tag range from this baseline, analyze which changes still apply to the Pi-only package boundary, and selectively port the relevant updates instead of merging blindly.
 
@@ -67,6 +68,14 @@ Pi clones git packages and runs `npm install` when `package.json` exists.
 - `pi.prompts`: `./prompts`
 
 Role definitions live in package-owned `agents/` and are read by the extension when injecting branch-task guidance.
+
+## Selected v0.6.6 updates
+
+- Keeps Pi's injected `systemPrompt` byte-stable across turns for provider prefix-cache reuse.
+- Delivers changing workflow/task context as hidden custom messages instead of rewriting user input.
+- Restores runtime context after compaction when the hidden message was removed.
+- Restricts JSONL-referenced context files to the project root.
+- Does not include or depend on the Oh My Pi extension; only its generally useful compaction-safety pattern was adapted to the native Pi API.
 
 ## What is intentionally not included
 

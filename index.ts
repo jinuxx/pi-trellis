@@ -1,7 +1,7 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { createHash, randomBytes } from "node:crypto";
-import { dirname, isAbsolute, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
+import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -97,6 +97,23 @@ function sanitizeContextKey(value: string): string {
   return value.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 160) || hash(value);
 }
 
+function resolveProjectFile(root: string, file: string): string | null {
+  try {
+    const rootPath = realpathSync(root);
+    const filePath = realpathSync(resolve(root, file));
+    const rel = relative(rootPath, filePath);
+    const isInsideRoot =
+      rel === "" ||
+      (rel !== ".." &&
+        !rel.startsWith("../") &&
+        !rel.startsWith("..\\") &&
+        !isAbsolute(rel));
+    return isInsideRoot ? filePath : null;
+  } catch {
+    return null;
+  }
+}
+
 // ── Trellis context discovery ─────────────────────────────────────────
 function findRoot(start: string): string {
   let current = resolve(start);
@@ -183,9 +200,11 @@ function buildManifestContext(root: string, taskDir: string, agent: TrellisAgent
     if (!text) continue;
     try {
       const row = JSON.parse(text) as JsonObject;
-      const file = typeof row.file === "string" ? row.file : "";
+      const file = typeof row.file === "string" ? row.file.trim() : "";
       if (!file) continue;
-      const content = readText(join(root, file));
+      const filePath = resolveProjectFile(root, file);
+      if (!filePath) continue;
+      const content = readText(filePath);
       if (content) chunks.push(`## ${file}\n\n${content}`);
     } catch {
       // Ignore malformed planning seed/example rows.
@@ -377,15 +396,27 @@ export default function trellisExtension(pi: {
     return turnCache;
   };
 
-  const startupKeys = new Set<string>();
+  // Keep all system-prompt additions byte-stable so provider prefix caches remain valid.
+  // Runtime changes are delivered through persisted hidden custom messages instead.
+  const startupContextCache = new Map<string, string>();
+  const taskContextSnapshot = new Map<string, string>();
+  const guidanceSnapshot = new Map<string, string>();
+  const lastSentTaskContext = new Map<string, string>();
+  const lastSentGuidance = new Map<string, string>();
+  const lastSentRuntimeContext = new Map<string, string>();
+  const compactedContexts = new Set<string>();
+
   const getStartupContext = (
     key: string | null,
     turn: { overview: string },
   ): string => {
     const cacheKey = key ?? "default";
-    if (startupKeys.has(cacheKey)) return "";
-    startupKeys.add(cacheKey);
-    return buildStartupContext(root, key, turn.overview);
+    let startup = startupContextCache.get(cacheKey);
+    if (startup === undefined) {
+      startup = buildStartupContext(root, key, turn.overview);
+      startupContextCache.set(cacheKey, startup);
+    }
+    return startup;
   };
 
   pi.on?.("session_start", (event, ctx) => {
@@ -409,35 +440,120 @@ export default function trellisExtension(pi: {
     }
   });
 
-  pi.on?.("input", (event, ctx) => {
-    const key = getKey(event, ctx);
-    const ev = event as { text?: string };
-    if (typeof ev.text !== "string" || !ev.text.trim()) {
-      return { action: "continue" };
-    }
-    const { workflow, overview } = getTurnContext(key);
-    const injection = [workflow, overview].filter(Boolean).join("\n\n");
-    if (!injection) return { action: "continue" };
-    return {
-      action: "transform",
-      text: [ev.text, injection].join("\n\n"),
-    };
+  pi.on?.("session_before_compact", (event, ctx) => {
+    const key = getKey(event, ctx) ?? "default";
+    compactedContexts.add(key);
   });
 
   pi.on?.("before_agent_start", (event, ctx) => {
-    const key = getKey(event, ctx);
+    const contextKey = getKey(event, ctx);
+    const key = contextKey ?? "default";
     const cur = (event as { systemPrompt?: string }).systemPrompt ?? "";
-    const turn = getTurnContext(key);
-    const startup = getStartupContext(key, turn);
-    const { implementContext, workflow, overview, guidance } = turn;
+    const turn = getTurnContext(contextKey);
+    const startup = getStartupContext(contextKey, turn);
+    const { implementContext: freshTaskContext, workflow, overview, guidance: freshGuidance } =
+      turn;
+
+    let taskContext = taskContextSnapshot.get(key);
+    if (taskContext === undefined) {
+      taskContext = freshTaskContext;
+      taskContextSnapshot.set(key, taskContext);
+      lastSentTaskContext.set(key, freshTaskContext);
+    }
+
+    let guidance = guidanceSnapshot.get(key);
+    if (guidance === undefined) {
+      guidance = freshGuidance;
+      guidanceSnapshot.set(key, guidance);
+      lastSentGuidance.set(key, freshGuidance);
+    }
+
+    const updates: string[] = [];
+    const runtimeContext = [workflow, overview].filter(Boolean).join("\n\n");
+    if (
+      runtimeContext &&
+      (compactedContexts.has(key) || runtimeContext !== lastSentRuntimeContext.get(key))
+    ) {
+      lastSentRuntimeContext.set(key, runtimeContext);
+      updates.push(runtimeContext);
+    }
+    if (freshTaskContext !== lastSentTaskContext.get(key)) {
+      lastSentTaskContext.set(key, freshTaskContext);
+      updates.push(
+        "<trellis-task-context-update>\nTask context changed on disk. This supersedes the Trellis Task Context in the system prompt.\n\n" +
+          freshTaskContext +
+          "\n</trellis-task-context-update>",
+      );
+    }
+    if (freshGuidance !== lastSentGuidance.get(key)) {
+      lastSentGuidance.set(key, freshGuidance);
+      updates.push(
+        "<trellis-branch-guidance-update>\nBranch guidance changed. This supersedes the branch guidance in the system prompt.\n\n" +
+          freshGuidance +
+          "\n</trellis-branch-guidance-update>",
+      );
+    }
+    compactedContexts.delete(key);
+
+    const content = updates.join("\n\n");
     return {
-      systemPrompt: [cur, startup, implementContext, workflow, overview, guidance]
-        .filter(Boolean)
-        .join("\n\n"),
+      message: content
+        ? {
+            customType: "trellis-runtime-context",
+            content,
+            display: false,
+          }
+        : undefined,
+      systemPrompt: [cur, startup, taskContext, guidance].filter(Boolean).join("\n\n"),
     };
   });
 
+  // A hidden runtime message can be removed by compaction during an agent run.
+  // Re-add the latest context non-destructively for post-compaction continuations.
   pi.on?.("context", (event, ctx) => {
-    getKey(event, ctx);
+    const contextKey = getKey(event, ctx);
+    const key = contextKey ?? "default";
+    if (!compactedContexts.has(key)) return;
+
+    const messages = (event as { messages?: JsonObject[] }).messages ?? [];
+    if (
+      messages.some(
+        (message) =>
+          message.role === "custom" && message.customType === "trellis-runtime-context",
+      )
+    ) {
+      return;
+    }
+
+    const turn = getTurnContext(contextKey);
+    const taskContext = taskContextSnapshot.get(key) ?? "";
+    const guidance = guidanceSnapshot.get(key) ?? "";
+    const recoveryParts = [
+      [turn.workflow, turn.overview].filter(Boolean).join("\n\n"),
+    ];
+    if (turn.implementContext !== taskContext) {
+      recoveryParts.push(
+        `<trellis-task-context-update>\n${turn.implementContext}\n</trellis-task-context-update>`,
+      );
+    }
+    if (turn.guidance !== guidance) {
+      recoveryParts.push(
+        `<trellis-branch-guidance-update>\n${turn.guidance}\n</trellis-branch-guidance-update>`,
+      );
+    }
+    const recovery = recoveryParts.filter(Boolean).join("\n\n");
+    if (!recovery) return;
+
+    return {
+      messages: [
+        ...messages,
+        {
+          role: "custom",
+          customType: "trellis-runtime-context",
+          content: recovery,
+          timestamp: Date.now(),
+        },
+      ],
+    };
   });
 }

@@ -1,6 +1,6 @@
 {
   "name": "pi-trellis",
-  "version": "0.1.0",
+  "version": "0.6.6",
   "description": "Pi-only Trellis workflow package using pi-supergsd visible task branches.",
   "type": "module",
   "keywords": [
@@ -19,9 +19,9 @@
   "trellisUpstream": {
     "type": "git",
     "url": "https://github.com/mindfold-ai/Trellis.git",
-    "tag": "v0.6.5",
-    "version": "0.6.5",
-    "recordedAt": "2026-06-25",
+    "tag": "v0.6.6",
+    "version": "0.6.6",
+    "recordedAt": "2026-07-13",
     "purpose": "Track the upstream Trellis tag baseline so future upstream updates can be reviewed and selectively ported into this Pi-only package."
   },
   "pi": {
