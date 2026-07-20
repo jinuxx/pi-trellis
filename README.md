@@ -13,10 +13,10 @@ First-pass package shape for local path validation and GitHub install. It is **n
 This project is adapted from [`mindfold-ai/Trellis`](https://github.com/mindfold-ai/Trellis). The current upstream baseline is recorded in `package.json` under `trellisUpstream`:
 
 - Repository: `https://github.com/mindfold-ai/Trellis.git`
-- Package version: `0.6.6` (kept aligned with the upstream baseline)
-- Tag: [`v0.6.6`](https://github.com/mindfold-ai/Trellis/tree/v0.6.6)
-- Upstream version: `0.6.6`
-- Recorded at: `2026-07-13`
+- Package version: `0.6.7` (kept aligned with the upstream baseline)
+- Tag: [`v0.6.7`](https://github.com/mindfold-ai/Trellis/tree/v0.6.7)
+- Upstream version: `0.6.7`
+- Recorded at: `2026-07-20`
 
 When upstream changes, compare the new upstream tag range from this baseline, analyze which changes still apply to the Pi-only package boundary, and selectively port the relevant updates instead of merging blindly.
 
@@ -68,6 +68,12 @@ Pi clones git packages and runs `npm install` when `package.json` exists.
 - `pi.prompts`: `./prompts`
 
 Role definitions live in package-owned `agents/` and are read by the extension when injecting branch-task guidance.
+
+## Selected v0.6.7 updates
+
+- Updates Pi session-history guidance for the default or configured session root, including global and project-local `.pi/settings.json`.
+- Documents that relative Pi `sessionDir` values resolve from the directory containing the settings file.
+- Keeps upstream CLI/core filesystem-hardening changes out of this package because it neither ships those runtimes nor installs a `.trellis/` scaffold.
 
 ## Selected v0.6.6 updates
 

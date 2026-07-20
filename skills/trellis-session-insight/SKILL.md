@@ -11,7 +11,7 @@ It is intentionally a **capability skill, not a workflow**. There is no fixed ou
 
 ## What `trellis mem` is
 
-A local CLI that indexes the user's past Pi Agent conversation logs under `~/.pi/agent/sessions/` and lets you list, search, slice by Trellis task boundaries, and dump cleaned dialogue from them.
+A local CLI that indexes the user's past Pi Agent conversation logs and lets you list, search, slice by Trellis task boundaries, and dump cleaned dialogue from them. Pi sessions may live under the default session root, an environment-configured root, the global `~/.pi/agent/settings.json` `sessionDir`, or a scoped project's `.pi/settings.json` `sessionDir`. Relative `sessionDir` values resolve from the directory containing that settings file; project-local settings require project-scoped lookup through the current cwd or `--cwd`.
 
 This Pi-only package does not rely on Claude Code, Codex, OpenCode, or other platform logs. If old `trellis mem` commands still expose non-Pi providers, treat them as legacy implementation detail and prefer Pi-scoped project searches.
 
