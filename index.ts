@@ -1,6 +1,13 @@
+import { isUtf8 } from "node:buffer";
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -22,8 +29,14 @@ type TrellisAgent = "trellis-implement" | "trellis-check" | "trellis-research";
 const PACKAGE_ROOT = dirname(fileURLToPath(import.meta.url));
 const SESSION_OVERVIEW_TIMEOUT_MS = 1500;
 const FIRST_REPLY_NOTICE = `<first-reply-notice>
-First visible reply: say once in Chinese that Trellis SessionStart context is loaded, then answer directly.
-This notice is one-shot: do not repeat it after the first assistant reply in the same session.
+On the first visible assistant reply in this session, briefly acknowledge that Trellis SessionStart context loaded.
+Choose the acknowledgment language in this order:
+1. Use the language of the user's current request (the user message that triggered this reply).
+2. If that request has no clear natural language, use an explicitly established project communication language.
+3. If neither provides a language, output the language-neutral fallback exactly: \`Trellis SessionStart ✓\`.
+Continue directly with the user's request after the acknowledgment.
+The acknowledgment must not alter the language used for the remainder of the response.
+This notice is one-shot: do not repeat it after the first visible assistant reply in this session.
 </first-reply-notice>`;
 const TRELLIS_AGENT_JSONL: Record<string, string> = {
   "trellis-implement": "implement.jsonl",
@@ -114,6 +127,204 @@ function resolveProjectFile(root: string, file: string): string | null {
   }
 }
 
+interface ContextInjectionLimits {
+  max_file_bytes: number;
+  max_artifact_bytes: number;
+  max_total_bytes: number;
+}
+
+const DEFAULT_CONTEXT_INJECTION_LIMITS: ContextInjectionLimits = {
+  max_file_bytes: 32768,
+  max_artifact_bytes: 65536,
+  max_total_bytes: 131072,
+};
+
+function truncateUtf8(buf: Buffer, cap: number): Buffer {
+  if (cap <= 0 || buf.length <= cap) return buf;
+  let i = cap;
+  while (i > 0 && (buf[i - 1]! & 0xc0) === 0x80) i--;
+  if (i === 0) return Buffer.alloc(0);
+  const lead = buf[i - 1]!;
+  if (lead & 0x80) {
+    let sequenceLength = 1;
+    if ((lead & 0xe0) === 0xc0) sequenceLength = 2;
+    else if ((lead & 0xf0) === 0xe0) sequenceLength = 3;
+    else if ((lead & 0xf8) === 0xf0) sequenceLength = 4;
+    if (i - 1 + sequenceLength > cap) i--;
+  }
+  return buf.subarray(0, i);
+}
+
+function stripInlineComment(value: string): string {
+  let quote: string | null = null;
+  for (let i = 0; i < value.length; i++) {
+    const char = value[i]!;
+    if (quote) {
+      if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === "#" && (i === 0 || /\s/.test(value[i - 1]!))) {
+      return value.slice(0, i);
+    }
+  }
+  return value;
+}
+
+function unquoteYaml(value: string): string {
+  if (
+    value.length >= 2 &&
+    value[0] === value[value.length - 1] &&
+    (value[0] === '"' || value[0] === "'")
+  ) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
+function readContextInjectionLimits(root: string): ContextInjectionLimits {
+  const limits = { ...DEFAULT_CONTEXT_INJECTION_LIMITS };
+  const config = readText(join(root, ".trellis", "config.yaml"));
+  if (!config) return limits;
+
+  let inSection = false;
+  let sectionIndent = -1;
+  for (const line of config.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!inSection) {
+      if (/^context_injection\s*:\s*(#.*)?$/.test(trimmed)) {
+        inSection = true;
+        sectionIndent = line.length - line.trimStart().length;
+      }
+      continue;
+    }
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const indent = line.length - line.trimStart().length;
+    if (indent <= sectionIndent) break;
+    const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)$/);
+    if (!match) continue;
+    const key = match[1]!;
+    if (!(key in limits)) continue;
+    const raw = unquoteYaml(stripInlineComment(match[2]!).trim()).trim();
+    if (!/^-?\d+$/.test(raw)) continue;
+    const value = Number.parseInt(raw, 10);
+    if (value < 0) continue;
+    limits[key as keyof ContextInjectionLimits] = value;
+  }
+  return limits;
+}
+
+class ContextBudget {
+  private used = 0;
+
+  constructor(private readonly maxTotalBytes: number) {}
+
+  hasRoom(size: number): boolean {
+    return this.maxTotalBytes <= 0 || this.used + size <= this.maxTotalBytes;
+  }
+
+  add(size: number): void {
+    this.used += size;
+  }
+}
+
+function truncateNotice(path: string, cap: number): string {
+  return `\n[Trellis: truncated at ${cap} bytes — read ${path} for the full content]`;
+}
+
+function binaryNotice(path: string, size: number, reason: string): string {
+  return `[Trellis: not inlined (binary file) — ${path} (${size} bytes): ${reason}]`;
+}
+
+function indexNotice(path: string, size: number, reason: string): string {
+  return `[Trellis: not inlined (total context limit reached) — ${path} (${size} bytes): ${reason}]`;
+}
+
+function readFileBytes(path: string): Buffer | null {
+  try {
+    if (!statSync(path).isFile()) return null;
+    return readFileSync(path);
+  } catch {
+    return null;
+  }
+}
+
+function budgetedBlock(
+  budget: ContextBudget,
+  header: string,
+  path: string,
+  content: string,
+  reason: string,
+  sourceSize: number,
+): string {
+  const block = `=== ${header} ===\n${content}`;
+  const blockSize = Buffer.byteLength(block, "utf-8");
+  if (!budget.hasRoom(blockSize)) {
+    const notice = indexNotice(path, sourceSize, reason);
+    budget.add(Buffer.byteLength(notice, "utf-8"));
+    return notice;
+  }
+  budget.add(blockSize);
+  return block;
+}
+
+function materializeFile(
+  path: string,
+  displayPath: string,
+  reason: string,
+  limits: ContextInjectionLimits,
+  budget: ContextBudget,
+): string | null {
+  const data = readFileBytes(path);
+  if (data === null) return null;
+  if (data.includes(0) || !isUtf8(data)) {
+    const notice = binaryNotice(displayPath, data.length, reason);
+    budget.add(Buffer.byteLength(notice, "utf-8"));
+    return notice;
+  }
+  const truncated = truncateUtf8(data, limits.max_file_bytes);
+  let content = truncated.toString("utf-8");
+  if (truncated.length < data.length) {
+    content += truncateNotice(displayPath, limits.max_file_bytes);
+  }
+  return budgetedBlock(
+    budget,
+    displayPath,
+    displayPath,
+    content,
+    reason,
+    data.length,
+  );
+}
+
+function materializeArtifact(
+  path: string,
+  displayPath: string,
+  label: string,
+  reason: string,
+  limits: ContextInjectionLimits,
+  budget: ContextBudget,
+): string | null {
+  const data = readFileBytes(path);
+  if (data === null) return null;
+  const truncated = truncateUtf8(data, limits.max_artifact_bytes);
+  let content = truncated.toString("utf-8");
+  if (truncated.length < data.length) {
+    content += truncateNotice(displayPath, limits.max_artifact_bytes);
+  }
+  return budgetedBlock(
+    budget,
+    `${displayPath} (${label})`,
+    displayPath,
+    content,
+    reason,
+    data.length,
+  );
+}
+
 // ── Trellis context discovery ─────────────────────────────────────────
 function findRoot(start: string): string {
   let current = resolve(start);
@@ -190,7 +401,13 @@ function readTaskDir(root: string, key: string | null): string | null {
   }
 }
 
-function buildManifestContext(root: string, taskDir: string, agent: TrellisAgent): string {
+function buildManifestContext(
+  root: string,
+  taskDir: string,
+  agent: TrellisAgent,
+  limits: ContextInjectionLimits,
+  budget: ContextBudget,
+): string {
   const jsonlName = TRELLIS_AGENT_JSONL[agent] ?? "";
   if (!jsonlName) return "";
 
@@ -204,13 +421,14 @@ function buildManifestContext(root: string, taskDir: string, agent: TrellisAgent
       if (!file) continue;
       const filePath = resolveProjectFile(root, file);
       if (!filePath) continue;
-      const content = readText(filePath);
-      if (content) chunks.push(`## ${file}\n\n${content}`);
+      const reason = str(row.reason) ?? "-";
+      const block = materializeFile(filePath, file, reason, limits, budget);
+      if (block) chunks.push(block);
     } catch {
       // Ignore malformed planning seed/example rows.
     }
   }
-  return chunks.join("\n\n---\n\n");
+  return chunks.join("\n\n");
 }
 
 function buildTaskContext(root: string, agent: TrellisAgent, key: string | null): string {
@@ -219,19 +437,42 @@ function buildTaskContext(root: string, agent: TrellisAgent, key: string | null)
     return "No active Trellis task found. Run `python3 ./.trellis/scripts/task.py current --source` or ask the user which task to use before queueing branch work.";
   }
 
-  const prd = readText(join(taskDir, "prd.md"));
-  const design = readText(join(taskDir, "design.md"));
-  const implement = readText(join(taskDir, "implement.md"));
-  const manifest = buildManifestContext(root, taskDir, agent);
+  const limits = readContextInjectionLimits(root);
+  const budget = new ContextBudget(limits.max_total_bytes);
+  const manifest = buildManifestContext(root, taskDir, agent, limits, budget);
+  const relativeTaskDir = relative(root, taskDir).replace(/\\/g, "/");
+  const prd = materializeArtifact(
+    join(taskDir, "prd.md"),
+    `${relativeTaskDir}/prd.md`,
+    "Requirements",
+    "Requirements document",
+    limits,
+    budget,
+  );
+  const design = materializeArtifact(
+    join(taskDir, "design.md"),
+    `${relativeTaskDir}/design.md`,
+    "Technical Design",
+    "Technical design document",
+    limits,
+    budget,
+  );
+  const implement = materializeArtifact(
+    join(taskDir, "implement.md"),
+    `${relativeTaskDir}/implement.md`,
+    "Execution Plan",
+    "Execution plan document",
+    limits,
+    budget,
+  );
 
   return [
     "## Trellis Task Context",
     `Task directory: ${taskDir}`,
     "",
-    "### prd.md",
-    prd || "(missing)",
-    design ? `\n### design.md\n${design}` : "",
-    implement ? `\n### implement.md\n${implement}` : "",
+    prd ?? `(missing) ${relativeTaskDir}/prd.md`,
+    design ? `\n${design}` : "",
+    implement ? `\n${implement}` : "",
     manifest ? `\n### Curated Spec / Research Context\n${manifest}` : "",
   ].join("\n");
 }
