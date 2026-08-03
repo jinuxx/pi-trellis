@@ -13,10 +13,10 @@ First-pass package shape for local path validation and GitHub install. It is **n
 This project is adapted from [`mindfold-ai/Trellis`](https://github.com/mindfold-ai/Trellis). The current upstream baseline is recorded in `package.json` under `trellisUpstream`:
 
 - Repository: `https://github.com/mindfold-ai/Trellis.git`
-- Package version: `0.6.10` (kept aligned with the upstream baseline)
-- Tag: [`v0.6.10`](https://github.com/mindfold-ai/Trellis/tree/v0.6.10)
-- Upstream version: `0.6.10`
-- Recorded at: `2026-07-30`
+- Package version: `0.6.12` (kept aligned with the upstream baseline)
+- Tag: [`v0.6.12`](https://github.com/mindfold-ai/Trellis/tree/v0.6.12)
+- Upstream version: `0.6.12`
+- Recorded at: `2026-08-03`
 
 When upstream changes, compare the new upstream tag range from this baseline, analyze which changes still apply to the Pi-only package boundary, and selectively port the relevant updates instead of merging blindly.
 
@@ -68,6 +68,13 @@ Pi clones git packages and runs `npm install` when `package.json` exists.
 - `pi.prompts`: `./prompts`
 
 Role definitions live in package-owned `agents/` and are read by the extension when injecting branch-task guidance.
+
+## Selected v0.6.12 updates
+
+- Uses Pi's native session identity as the Trellis context key and binds `sessionManager` getters to their owner.
+- Adds a hash when session ID normalization or length limiting changes the value, preventing different native sessions from colliding.
+- Removes cross-session task adoption and does not treat a stale `TRELLIS_CONTEXT_ID` environment variable as the current Pi session; the variable remains an explicit bash child-process carrier after the current key is resolved.
+- This selective port excludes v0.6.11 hidden-subagent/CLI changes, v0.7 beta workflow changes, and all non-Pi runtime updates.
 
 ## Selected v0.6.10 updates
 

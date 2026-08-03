@@ -4,7 +4,6 @@ import { createHash, randomBytes } from "node:crypto";
 import {
   existsSync,
   readFileSync,
-  readdirSync,
   realpathSync,
   statSync,
 } from "node:fs";
@@ -81,9 +80,9 @@ function hash(input: string): string {
   return createHash("sha256").update(input).digest("hex").slice(0, 24);
 }
 
-function callStr(fn: unknown): string | undefined {
+function callStr(fn: unknown, receiver?: unknown): string | undefined {
   try {
-    return typeof fn === "function" ? str(fn()) : undefined;
+    return typeof fn === "function" ? str(fn.call(receiver)) : undefined;
   } catch {
     return undefined;
   }
@@ -107,7 +106,15 @@ function cmdHasTrellisCtx(cmd: string): boolean {
 }
 
 function sanitizeContextKey(value: string): string {
-  return value.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 160) || hash(value);
+  const normalized = value.replace(/[^A-Za-z0-9._-]+/g, "_");
+  if (!normalized) return hash(value);
+
+  const maxLength = 160;
+  const truncated = normalized.slice(0, maxLength);
+  if (normalized === value && truncated === normalized) return normalized;
+
+  const suffix = `_${hash(value)}`;
+  return `${truncated.slice(0, maxLength - suffix.length)}${suffix}`;
 }
 
 function resolveProjectFile(root: string, file: string): string | null {
@@ -339,48 +346,19 @@ function findRoot(start: string): string {
 }
 
 function contextKey(input?: unknown, ctx?: PiExtensionContext): string | null {
-  const override = str(process.env.TRELLIS_CONTEXT_ID);
-  if (override) return sanitizeContextKey(override);
-
   const sessionId =
-    callStr(ctx?.sessionManager?.getSessionId) ??
+    callStr(ctx?.sessionManager?.getSessionId, ctx?.sessionManager) ??
     str(process.env.PI_SESSION_ID) ??
     str(process.env.PI_SESSIONID) ??
     lookupStr(input, ["session_id", "sessionId", "sessionID"]);
   if (sessionId) return `pi_${sanitizeContextKey(sessionId)}`;
 
   const transcriptPath =
-    callStr(ctx?.sessionManager?.getSessionFile) ??
+    callStr(ctx?.sessionManager?.getSessionFile, ctx?.sessionManager) ??
     lookupStr(input, ["transcript_path", "transcriptPath", "transcript"]);
   if (transcriptPath) return `pi_transcript_${hash(transcriptPath)}`;
 
   return null;
-}
-
-function sessionHasTask(root: string, key: string): boolean {
-  try {
-    const ctx = JSON.parse(
-      readText(join(root, ".trellis", ".runtime", "sessions", `${key}.json`)),
-    ) as JsonObject;
-    return !!str(ctx.current_task);
-  } catch {
-    return false;
-  }
-}
-
-function adoptKey(root: string, key: string): string {
-  if (sessionHasTask(root, key)) return key;
-  try {
-    const dir = join(root, ".trellis", ".runtime", "sessions");
-    const keys = readdirSync(dir)
-      .filter((file) => file.endsWith(".json") && sessionHasTask(root, file.slice(0, -5)))
-      .map((file) => file.slice(0, -5));
-    const processKeys = keys.filter((k) => k.startsWith("pi_process_"));
-    const candidates = processKeys.length ? processKeys : keys;
-    return candidates.length === 1 ? candidates[0]! : key;
-  } catch {
-    return key;
-  }
 }
 
 function readTaskDir(root: string, key: string | null): string | null {
@@ -607,7 +585,7 @@ export default function trellisExtension(pi: {
   let currentKey: string | null = null;
 
   const getKey = (input?: unknown, ctx?: PiExtensionContext) => {
-    const key = adoptKey(root, contextKey(input, ctx) ?? currentKey ?? processKey);
+    const key = contextKey(input, ctx) ?? currentKey ?? processKey;
     currentKey = key;
     return key;
   };
