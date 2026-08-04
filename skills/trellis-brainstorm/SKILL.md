@@ -41,6 +41,10 @@ Use a concise title from the user's request. Use a slug without a date prefix. `
 
 `task.py create` creates the default `prd.md`. Update that file with the current understanding before asking follow-up questions.
 
+## Main-session dispatch boundary
+
+Planning, clarification, task-artifact authoring, and read-only repository orientation stay in the main session. After the user approves the final planning summary and execution begins, the main session must queue any implementation, check/fix, or task-scoped research through `pi-supergsd`'s `push-task` before doing that work, regardless of size. The only direct-work exception is an explicit user instruction to work in the current session. If `push-task` is unavailable, report that capability gap rather than silently executing the branch work in the main session.
+
 ## Planning Flow
 
 1. Capture the user's request and initial known facts in `prd.md`.

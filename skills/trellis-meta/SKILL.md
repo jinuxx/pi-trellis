@@ -26,8 +26,10 @@ This project is being rebaselined as a **Pi Agent only** Trellis package. Treat 
 
 - Trellis is scoped to Pi Agent in this project.
 - Queue visible branch work through pi-supergsd `push-task`; the user starts it with `/start-task` and returns with `/finish-task`.
+- In the main session, any task work that changes files, runs checks/fixes, or performs task research must be queued before execution, regardless of size. Only read-only planning/orientation or an explicit user request for direct current-session work may stay in the main session.
+- If `push-task` is unavailable, report the missing pi-supergsd capability rather than silently doing branch work in the main session.
 - The queued prompt must be self-contained and start with `Active task: <task path>`.
-- Include role instructions, task artifacts, and curated JSONL context in branch prompts.
+- Include exactly one role instruction file, task artifacts, and curated JSONL context in branch prompts. Files under package-owned `agents/` are branch-only payloads and are not main-session instructions.
 - Do not reintroduce hidden subprocess dispatch or a `trellis_subagent` fallback.
 - Do not add Superpowers skills; pi-supergsd should be loaded with `skills: []`.
 - Keep changes surgical and local unless the user explicitly asks for package publishing/extraction.

@@ -67,7 +67,7 @@ Pi clones git packages and runs `npm install` when `package.json` exists.
 - `pi.skills`: `./skills`
 - `pi.prompts`: `./prompts`
 
-Role definitions live in package-owned `agents/` and are read by the extension when injecting branch-task guidance.
+Role definitions live in package-owned `agents/` as branch-only prompt payloads. The extension injects only their file catalog into the main session and, when a queued prompt declares `Branch role: ...`, attaches the selected role file to that branch prompt.
 
 ## Selected v0.6.12 updates
 
@@ -110,7 +110,14 @@ context_injection:
 
 ## Usage model
 
-When fresh implementation/check/research isolation is useful, the main Pi session queues a self-contained branch task through `push-task` from `pi-supergsd`.
+The main session has an explicit branch-dispatch gate:
+
+- Read-only planning and orientation may stay in the main session.
+- Any task work that changes files, runs checks/fixes, or performs task research must be queued with `push-task` before that work, regardless of size.
+- Direct work in the main session is allowed only when the user explicitly requests it. A small or familiar task is not an implicit exception.
+- If `push-task` is unavailable, report the missing `pi-supergsd` capability instead of silently doing branch work directly.
+
+Before dispatching, the main session may inspect the task artifacts needed to make the prompt self-contained. It must then call `push-task` alone in that turn and wait for the user to start the branch.
 
 The branch prompt must start with:
 
@@ -118,7 +125,7 @@ The branch prompt must start with:
 Active task: .trellis/tasks/<task-dir>
 ```
 
-It should include role instructions, task artifacts, curated JSONL context, and constraints such as no `git commit`, `git push`, or `git merge`.
+It should declare exactly one role on a line such as `Branch role: trellis-implement`; the extension attaches that role instruction file from package-owned `agents/`. Include task artifacts, curated JSONL context, and constraints such as no `git commit`, `git push`, or `git merge`. The role files are for the visible branch only and must not be treated as main-session instructions.
 
 The user starts the branch with:
 

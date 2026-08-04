@@ -455,16 +455,34 @@ function buildTaskContext(root: string, agent: TrellisAgent, key: string | null)
   ].join("\n");
 }
 
-function roleDefinitionsContext(): string {
-  const sections = (Object.entries(TRELLIS_ROLE_FILES) as [TrellisAgent, string][])
-    .map(([agent, file]) => {
-      const content = readText(join(PACKAGE_ROOT, "agents", file)).trim();
-      return content ? `## ${agent} (${file})\n\n${content}` : "";
-    })
-    .filter(Boolean);
+function roleCatalogContext(): string {
+  const entries = (Object.entries(TRELLIS_ROLE_FILES) as [TrellisAgent, string][])
+    .map(([agent, file]) => `- ${agent}: ${join(PACKAGE_ROOT, "agents", file)}`)
+    .join("\n");
 
-  if (!sections.length) return "";
-  return `<trellis-package-role-definitions>\n${sections.join("\n\n---\n\n")}\n</trellis-package-role-definitions>`;
+  return `<trellis-package-branch-role-catalog>\nThese files are branch-only prompt payloads, not instructions for the main session. Do not adopt their branch-task guards here. Before calling push-task, choose exactly one role and state it on its own line as \`Branch role: <role>\`. The extension will attach that role file to the queued prompt.\n${entries}\n</trellis-package-branch-role-catalog>`;
+}
+
+function branchRoleFromPrompt(prompt: string): TrellisAgent | null {
+  const matches = [
+    ...prompt.matchAll(/^\s*Branch role:\s*(trellis-(?:implement|check|research))\s*$/gim),
+  ];
+  if (matches.length !== 1) return null;
+
+  const role = matches[0]?.[1];
+  return role === "trellis-implement" || role === "trellis-check" || role === "trellis-research"
+    ? role
+    : null;
+}
+
+function attachBranchRole(input: JsonObject): void {
+  const prompt = typeof input.prompt === "string" ? input.prompt : "";
+  const role = branchRoleFromPrompt(prompt);
+  if (!role) return;
+
+  const roleText = readText(join(PACKAGE_ROOT, "agents", TRELLIS_ROLE_FILES[role])).trim();
+  if (!roleText || prompt.includes(roleText)) return;
+  input.prompt = `${prompt}\n\n--- Package branch role: ${role} ---\n${roleText}`;
 }
 
 // ── Workflow/session prompt injection ─────────────────────────────────
@@ -554,15 +572,18 @@ function branchTaskGuidance(root: string, key: string | null): string {
   return [
     "<trellis-pi-branch-task-guidance>",
     "Trellis is Pi-only in this project. Do not use `trellis_subagent`; that hidden child-process tool has been removed.",
-    "When fresh Trellis implement/check/research branch work is useful, queue it through pi-supergsd's `push-task` tool.",
+    "This is the main-session dispatch gate: any task work that changes files, runs checks/fixes, or performs task research MUST be queued through pi-supergsd's `push-task` tool before doing that work, regardless of task size.",
+    "The only exceptions are read-only planning/orientation and a direct user instruction to do the work in the current session. Do not infer a direct-work exception from a task being small or familiar.",
+    "If the user has not explicitly requested direct current-session work, do not edit files, run validation, or perform implementation/check/research after the task is scoped until `push-task` succeeds. If `push-task` is unavailable, explain the missing pi-supergsd capability instead of silently doing the work directly.",
+    "Before queueing, inspect only the context needed to make the prompt self-contained; then call `push-task` as the only tool call in that turn and stop the main-session work until the user starts the branch with `/start-task`.",
     "The queued prompt must be self-contained and should include:",
     `- first line: ${activeTaskLine}`,
-    "- the relevant role definition from this package's `agents/` directory; package role definitions are injected below when available",
+    "- a line identifying exactly one role as `Branch role: trellis-implement`, `Branch role: trellis-check`, or `Branch role: trellis-research`; the extension attaches the selected branch role file",
     "- task PRD/design/implement context and curated JSONL spec/research context",
     "- explicit constraints: no git commit/push/merge; user starts with `/start-task` and returns with `/finish-task`",
     "Use `push-task` only once per turn and do not mix it with other tool calls.",
     "</trellis-pi-branch-task-guidance>",
-    roleDefinitionsContext(),
+    roleCatalogContext(),
   ]
     .filter(Boolean)
     .join("\n");
@@ -649,6 +670,9 @@ export default function trellisExtension(pi: {
   pi.on?.("tool_call", (event, ctx) => {
     const key = getKey(event, ctx);
     const ev = event as { toolName?: string; input?: JsonObject };
+    if (ev.toolName === "push-task" && isObj(ev.input)) {
+      attachBranchRole(ev.input);
+    }
     if (
       ev.toolName === "bash" &&
       isObj(ev.input) &&
