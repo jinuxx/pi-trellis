@@ -117,21 +117,25 @@ function sanitizeContextKey(value: string): string {
   return `${truncated.slice(0, maxLength - suffix.length)}${suffix}`;
 }
 
-function resolveProjectFile(root: string, file: string): string | null {
+function resolveProjectPath(root: string, target: string): string | null {
   try {
     const rootPath = realpathSync(root);
-    const filePath = realpathSync(resolve(root, file));
-    const rel = relative(rootPath, filePath);
+    const targetPath = realpathSync(target);
+    const rel = relative(rootPath, targetPath);
     const isInsideRoot =
       rel === "" ||
       (rel !== ".." &&
         !rel.startsWith("../") &&
         !rel.startsWith("..\\") &&
         !isAbsolute(rel));
-    return isInsideRoot ? filePath : null;
+    return isInsideRoot ? targetPath : null;
   } catch {
     return null;
   }
+}
+
+function resolveProjectFile(root: string, file: string): string | null {
+  return resolveProjectPath(root, resolve(root, file));
 }
 
 interface ContextInjectionLimits {
@@ -371,12 +375,55 @@ function readTaskDir(root: string, key: string | null): string | null {
     if (!ref) return null;
     ref = ref.replace(/\\/g, "/").replace(/^\.\//, "");
     if (ref.startsWith("tasks/")) ref = `.trellis/${ref}`;
-    if (ref.startsWith(".trellis/")) return join(root, ref);
-    if (isAbsolute(ref)) return ref;
-    return join(root, ".trellis", "tasks", ref);
+    let target: string;
+    if (ref.startsWith(".trellis/")) {
+      target = join(root, ref);
+    } else if (isAbsolute(ref)) {
+      target = ref;
+    } else {
+      target = join(root, ".trellis", "tasks", ref);
+    }
+    return resolveProjectPath(root, target);
   } catch {
     return null;
   }
+}
+
+function resolveManifestFile(
+  root: string,
+  taskDir: string,
+  file: string,
+): string | null {
+  const taskParts = relative(realpathSync(root), taskDir).replace(/\\/g, "/").split("/");
+  const yearMonth = taskParts[3] ?? "";
+  const isArchivedTask =
+    taskParts.length === 5 &&
+    taskParts[0] === ".trellis" &&
+    taskParts[1] === "tasks" &&
+    taskParts[2] === "archive" &&
+    yearMonth.length === 7 &&
+    yearMonth[4] === "-" &&
+    /^\d{4}$/.test(yearMonth.slice(0, 4)) &&
+    /^\d{2}$/.test(yearMonth.slice(5));
+  if (!isArchivedTask) return resolveProjectFile(root, file);
+
+  const historicalRoot = `.trellis/tasks/${taskParts[4]}`;
+  const normalizedFile = file.replace(/\\/g, "/");
+  let relativePath: string;
+  if (normalizedFile === historicalRoot) {
+    relativePath = "";
+  } else if (normalizedFile.startsWith(`${historicalRoot}/`)) {
+    relativePath = normalizedFile.slice(historicalRoot.length + 1);
+    if (relativePath.endsWith("/")) relativePath = relativePath.slice(0, -1);
+    const relativeParts = relativePath ? relativePath.split("/") : [];
+    if (relativeParts.some((part) => !part || part === "." || part === "..")) {
+      return null;
+    }
+  } else {
+    return resolveProjectFile(root, file);
+  }
+
+  return resolveProjectFile(taskDir, relativePath);
 }
 
 function buildManifestContext(
@@ -395,9 +442,9 @@ function buildManifestContext(
     if (!text) continue;
     try {
       const row = JSON.parse(text) as JsonObject;
-      const file = typeof row.file === "string" ? row.file.trim() : "";
+      const file = str(row.file) ?? str(row.path) ?? "";
       if (!file) continue;
-      const filePath = resolveProjectFile(root, file);
+      const filePath = resolveManifestFile(root, taskDir, file);
       if (!filePath) continue;
       const reason = str(row.reason) ?? "-";
       const block = materializeFile(filePath, file, reason, limits, budget);
@@ -418,7 +465,7 @@ function buildTaskContext(root: string, agent: TrellisAgent, key: string | null)
   const limits = readContextInjectionLimits(root);
   const budget = new ContextBudget(limits.max_total_bytes);
   const manifest = buildManifestContext(root, taskDir, agent, limits, budget);
-  const relativeTaskDir = relative(root, taskDir).replace(/\\/g, "/");
+  const relativeTaskDir = relative(realpathSync(root), taskDir).replace(/\\/g, "/");
   const prd = materializeArtifact(
     join(taskDir, "prd.md"),
     `${relativeTaskDir}/prd.md`,
@@ -566,7 +613,7 @@ function buildStartupContext(root: string, key: string | null, overview: string)
 function branchTaskGuidance(root: string, key: string | null): string {
   const taskDir = readTaskDir(root, key);
   const activeTaskLine = taskDir
-    ? `Active task: ${taskDir.replace(root + "/", "")}`
+    ? `Active task: ${relative(realpathSync(root), taskDir).replace(/\\/g, "/")}`
     : "Active task: <path from `python3 ./.trellis/scripts/task.py current --source`>";
 
   return [
