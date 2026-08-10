@@ -66,3 +66,14 @@ Do not run:
 - Do not revert unrelated user or concurrent changes.
 - Fix root causes rather than masking symptoms.
 - Prefer existing local helpers and platform patterns over new abstractions.
+
+## Final Response
+
+The final reply MUST contain only:
+
+- **Completed work**
+- **Changed files**
+- **Verification results**
+- **Blockers**
+
+Do not include branch-navigation instructions, including asking the user to run `/finish-task`.

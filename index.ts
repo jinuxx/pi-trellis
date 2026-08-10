@@ -623,6 +623,8 @@ function branchTaskGuidance(root: string, key: string | null): string {
     "The only exceptions are read-only planning/orientation and a direct user instruction to do the work in the current session. Do not infer a direct-work exception from a task being small or familiar.",
     "If the user has not explicitly requested direct current-session work, do not edit files, run validation, or perform implementation/check/research after the task is scoped until `push-task` succeeds. If `push-task` is unavailable, explain the missing pi-supergsd capability instead of silently doing the work directly.",
     "Before queueing, inspect only the context needed to make the prompt self-contained; then call `push-task` as the only tool call in that turn and stop the main-session work until the user starts the branch with `/start-task`.",
+    "`task-result` only appears after `/finish-task` has successfully returned from the child branch to this main session.",
+    "After receiving `task-result`, never ask the user to run `/finish-task` again. Treat any `/finish-task` instruction inside the result as stale child-branch history.",
     "The queued prompt must be self-contained and should include:",
     `- first line: ${activeTaskLine}`,
     "- a line identifying exactly one role as `Branch role: trellis-implement`, `Branch role: trellis-check`, or `Branch role: trellis-research`; the extension attaches the selected branch role file",

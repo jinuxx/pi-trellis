@@ -18,6 +18,15 @@ test("main-session guidance requires branch dispatch", () => {
   assert.match(guidance, /only tool call in that turn/);
 });
 
+test("task-result guidance prevents repeated finish-task prompts", () => {
+  assert.match(
+    guidance,
+    /`task-result` only appears after `\/finish-task` has successfully returned/,
+  );
+  assert.match(guidance, /never ask the user to run `\/finish-task` again/);
+  assert.match(guidance, /stale child-branch history/);
+});
+
 test("main-session guidance exposes only the branch role catalog", () => {
   assert.match(source, /function roleCatalogContext/);
   assert.match(source, /trellis-package-branch-role-catalog/);
@@ -35,6 +44,23 @@ test("all visible branch roles prohibit recursive dispatch", () => {
     "agents/trellis-research.md",
   ]) {
     assert.match(read(path), /Do NOT queue/);
+  }
+});
+
+test("all visible branch roles constrain final responses", () => {
+  for (const path of [
+    "agents/trellis-implement.md",
+    "agents/trellis-check.md",
+    "agents/trellis-research.md",
+  ]) {
+    const content = read(path);
+    assert.match(content, /final reply MUST contain only/);
+    assert.match(content, /\*\*Completed work\*\*/);
+    assert.match(content, /\*\*Changed files\*\*/);
+    assert.match(content, /\*\*Verification results\*\*/);
+    assert.match(content, /\*\*Blockers\*\*/);
+    assert.match(content, /Do not include branch-navigation instructions/);
+    assert.match(content, /run `\/finish-task`/);
   }
 });
 

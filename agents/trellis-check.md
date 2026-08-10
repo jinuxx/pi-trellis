@@ -58,6 +58,13 @@ You are already running as the `trellis-check` role inside a visible Pi task bra
 - Missing or weak tests for logic changes.
 - Cross-platform path, command, and encoding assumptions.
 
-## Output
+## Final Response
 
-Report findings fixed, files changed, and verification results. If no issues remain, say that clearly.
+The final reply MUST contain only:
+
+- **Completed work**
+- **Changed files**
+- **Verification results**
+- **Blockers**
+
+Do not include branch-navigation instructions, including asking the user to run `/finish-task`.
