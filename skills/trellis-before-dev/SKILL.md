@@ -7,7 +7,7 @@ Read the relevant development guidelines before starting your task.
 
 ## Main-session dispatch gate
 
-This skill prepares context; it does not authorize the main session to implement. If the current session is the main Pi session, queue implementation, check/fix, or task-scoped research through `pi-supergsd`'s `push-task` before editing files, running validation, or doing that research. This applies regardless of task size. Read-only setup is allowed, and an explicit user instruction to work directly in the current session is the only other exception. If `push-task` is unavailable, report the missing capability instead of silently doing branch work directly. The selected package role file belongs in the queued prompt and must not be treated as main-session instructions.
+This skill prepares implementation context; it does not authorize the main session to implement. Queue implementation, check/fix, or task-scoped research through `pi-supergsd`'s `push-task`, unless the user explicitly requested direct current-session work. Planning, Trellis task/workspace management, Phase 3 `.trellis/spec/` updates, and commit/finish management may stay in the main session. If `push-task` is unavailable, report the missing capability. The selected package role file belongs in the queued prompt and must not be treated as main-session instructions.
 
 Execute these steps:
 

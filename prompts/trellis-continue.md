@@ -53,7 +53,7 @@ Follow the loaded instructions. After each `[required]` step completes, move to 
 
 ## Main-session branch gate
 
-This prompt may run in the main Pi session. It may reload context, select the current workflow step, and prepare the next action. It must not implement, check/fix, or perform task-scoped research directly. Once that work is ready, queue a self-contained task through `pi-supergsd`'s `push-task` before doing it, regardless of size. Only read-only preparation or an explicit user instruction to work directly in the current session is an exception. If `push-task` is unavailable, report the capability gap rather than silently doing branch work.
+This prompt runs in the main Pi session. It may reload context, manage Trellis task/workspace artifacts, select the current workflow step, and prepare the next action. Queue implementation, check/fix, or task-scoped research through `pi-supergsd`'s `push-task`, unless the user explicitly requests direct current-session work. Phase 3 `.trellis/spec/` updates and commit/finish management run directly in the main session; there is no update-spec branch role. If `push-task` is unavailable, report the capability gap.
 
 ## Reference
 

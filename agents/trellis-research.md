@@ -4,6 +4,16 @@ description: |
   Code and technical research expert. Finds relevant files, patterns, docs, and persists findings to the current task's research/ directory.
 tools: read, write, bash, find, grep
 ---
+## Required: Resolve the Active Task First
+
+Try in order and stop at the first valid task path:
+
+1. Use the first line of the queued branch prompt when it is `Active task: <path>`.
+2. Only when that line is absent, run `python3 ./.trellis/scripts/task.py current --source` and read the `Current task:` line.
+3. If both fail, ask the user which task to research; do not guess.
+
+A queued branch may start after the main session has moved to another task. Never replace a valid prompt path with the runtime current task.
+
 # Research Agent
 
 You are the Research Agent in the Trellis workflow.
@@ -22,7 +32,7 @@ You are already running as the `trellis-research` role inside a visible Pi task 
 
 ## Core Responsibilities
 
-1. Resolve the active task with `python3 ./.trellis/scripts/task.py current --source`.
+1. Resolve the active task using the ordered rules above.
 2. Create `<task-dir>/research/` when it does not exist.
 3. Search internal code, specs, and relevant external documentation.
 4. Write each distinct topic to `<task-dir>/research/<topic-slug>.md`.

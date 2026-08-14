@@ -7,28 +7,31 @@ description: "Understand and customize this Pi-only Trellis package: .trellis wo
 
 Use this skill when the user asks to modify Trellis itself in this project: workflow text, task scripts, specs, Pi extension hooks, Pi skills/prompts, role prompts, or the pi-supergsd branch-task integration.
 
-This project is being rebaselined as a **Pi Agent only** Trellis package. Treat local files as authoritative.
+This is a **Pi Agent only** Trellis package. Treat package files and the target project's own configuration as separate ownership boundaries.
 
-## Local Architecture
+## Package-Owned Architecture
 
 - `index.ts` — Pi extension that injects Trellis task/workflow context and branch-task guidance. It must not register the old hidden child-process `trellis_subagent` tool.
-- `agents/trellis-implement.md`, `agents/trellis-check.md`, `agents/trellis-research.md` — role prompts for visible Pi branch tasks, owned by the package root.
+- `agents/trellis-implement.md`, `agents/trellis-check.md`, `agents/trellis-research.md` — role prompts for visible Pi branch tasks.
 - `skills/` — Pi skills that remain useful for Trellis workflow guidance.
 - `prompts/` — Pi prompt templates such as continue and finish-work.
-- `.pi/settings.json` — project-level Pi settings that should load `pi-trellis` as a local package path and separately load filtered `pi-supergsd`.
-- `.trellis/workflow.md` — workflow source of truth. It should describe Pi branch-task flow, not multi-platform dispatch.
-- `.trellis/tasks/` — task PRD/design/implement/research artifacts and `implement.jsonl` / `check.jsonl` context manifests.
+
+## Target-Project-Owned State
+
+- `.pi/settings.json`, when present — target-project Pi settings that may load `pi-trellis` and filtered `pi-supergsd`.
+- `.trellis/workflow.md` — target project's workflow source of truth.
+- `.trellis/tasks/` — task PRD/design/implement/research artifacts and context manifests.
 - `.trellis/spec/` — project coding conventions and guides.
 - `.trellis/workspace/` — developer journals.
-- Filtered `pi-supergsd` user/package dependency — provides `push-task`, `/start-task`, `/finish-task`, `/abort-task`, `/discard-task`, and visible `task-result` messages.
+- Filtered `pi-supergsd` installation — provides `push-task`, `/start-task`, `/finish-task`, `/abort-task`, `/discard-task`, and visible `task-result` messages.
 
 ## Current Rules
 
 - Trellis is scoped to Pi Agent in this project.
-- Queue visible branch work through pi-supergsd `push-task`; the user starts it with `/start-task` and returns with `/finish-task`.
-- In the main session, any task work that changes files, runs checks/fixes, or performs task research must be queued before execution, regardless of size. Only read-only planning/orientation or an explicit user request for direct current-session work may stay in the main session.
-- If `push-task` is unavailable, report the missing pi-supergsd capability rather than silently doing branch work in the main session.
-- The queued prompt must be self-contained and start with `Active task: <task path>`.
+- Queue implementation, check/fix, and task-scoped research through pi-supergsd `push-task`; the user starts it with `/start-task [model]` and returns with `/finish-task`.
+- Planning/orientation, Trellis task/workspace management, Phase 3 `.trellis/spec/` updates, and commit/finish management may run in the main session. There is no update-spec branch role.
+- Direct implementation/check/research in the main session requires an explicit user request. If `push-task` is unavailable, report the missing capability.
+- Call `push-task` alone in its assistant tool batch with required `{title, prompt}` fields. The prompt must be self-contained and start with `Active task: <task path>`.
 - Include exactly one role instruction file, task artifacts, and curated JSONL context in branch prompts. Files under package-owned `agents/` are branch-only payloads and are not main-session instructions.
 - Do not reintroduce hidden subprocess dispatch or a `trellis_subagent` fallback.
 - Do not add Superpowers skills; pi-supergsd should be loaded with `skills: []`.
@@ -36,10 +39,10 @@ This project is being rebaselined as a **Pi Agent only** Trellis package. Treat 
 
 ## When Editing
 
-1. Read the current task artifacts under `.trellis/tasks/<active-task>/`.
-2. Read relevant `.trellis/spec/` guides before code changes.
+1. When changing package behavior, read `index.ts` and the affected package-owned `agents/`, `skills/`, `prompts/`, and tests.
+2. When changing a target project's workflow, read its current task artifacts and relevant `.trellis/spec/` guides.
 3. Search for old non-Pi or hidden-dispatch language before claiming cleanup is complete.
-4. Prefer updating `.pi/` and `.trellis/` local validation files first; package-owned layout migration is post-smoke unless the user changes scope.
+4. Do not invent package-local `.pi/` or `.trellis/` files; those belong to target projects.
 
 ## Do Not
 

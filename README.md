@@ -6,7 +6,7 @@ This package keeps Trellis task/spec/workflow context injection in Pi, but uses 
 
 ## Status
 
-First-pass package shape for local path validation and GitHub install. It is **not** published to the npm registry.
+Source-installable package for local path validation and GitHub install. It is **not** published to the npm registry.
 
 ## Upstream baseline
 
@@ -35,6 +35,8 @@ When upstream changes, compare the new upstream tag range from this baseline, an
 
 This package does not vendor or fork `pi-supergsd`.
 
+The `trellis-session-insight` skill additionally requires an optional, separately installed global Trellis CLI. This package does not include Trellis CLI/core.
+
 ## Install
 
 ### Local path validation
@@ -43,10 +45,8 @@ From this repository:
 
 ```bash
 pi install /absolute/path/to/pi-trellis
-# or, from a project .pi/settings.json, add a local package path that points at this repo
+# or add that local package path to a target project's .pi/settings.json
 ```
-
-This checkout's project `.pi/settings.json` uses a local package path for validation.
 
 ### GitHub install shape
 
@@ -73,7 +73,7 @@ Role definitions live in package-owned `agents/` as branch-only prompt payloads.
 
 - Resolves archived task JSONL self-references against the archived task copy, matching upstream task-context validation behavior.
 - Keeps active task directories and remapped context files inside the target project; rejects external task paths and archive traversal entries.
-- Does not port upstream CLI/core `trellis mem` compaction recovery or the Grok adapter because this package contains only the Pi extension and package resources.
+- Does not ship upstream CLI/core or the Grok adapter; `trellis-session-insight` can use a separately installed global Trellis CLI.
 
 ## Selected v0.6.12 updates
 
@@ -102,13 +102,14 @@ context_injection:
 
 - Keeps Pi's injected `systemPrompt` byte-stable across turns for provider prefix-cache reuse.
 - Delivers changing workflow/task context as hidden custom messages instead of rewriting user input.
-- Restores runtime context after compaction when the hidden message was removed.
+- Re-sends the latest dynamic runtime context through Pi hooks when a compaction removed its hidden message.
 - Restricts JSONL-referenced context files to the project root.
 - Does not include or depend on the Oh My Pi extension; only its generally useful compaction-safety pattern was adapted to the native Pi API.
 
 ## What is intentionally not included
 
-- No `.trellis/` scaffold is installed in the first pass. The target project must already have `.trellis/`.
+- No `.trellis/` scaffold. The target project must already have `.trellis/`.
+- No Trellis CLI/core.
 - No npm registry publication.
 - No Superpowers skills.
 - No hidden `trellis_subagent`, `runPi`, `runSubagent`, or `pi --mode json -p --no-session` subagent dispatch.
@@ -116,54 +117,49 @@ context_injection:
 
 ## Usage model
 
+The extension activates only when the current directory or an ancestor contains a real `.trellis/` directory. A `.pi/` directory alone does not activate it.
+
 The main session has an explicit branch-dispatch gate:
 
-- Read-only planning and orientation may stay in the main session.
-- Any task work that changes files, runs checks/fixes, or performs task research must be queued with `push-task` before that work, regardless of size.
-- Direct work in the main session is allowed only when the user explicitly requests it. A small or familiar task is not an implicit exception.
+- Planning/orientation, Trellis task/workspace management, Phase 3 `.trellis/spec/` updates, and commit/finish management may run directly in the main session.
+- Implementation, check/fix, and task-scoped research use visible `trellis-implement`, `trellis-check`, or `trellis-research` branches.
+- Direct implementation/check/research in the main session requires an explicit user request for current-session work.
+- There is no `trellis-update-spec` branch role. Run Phase 3 spec updates in the main session.
 - If `push-task` is unavailable, report the missing `pi-supergsd` capability instead of silently doing branch work directly.
 
-Before dispatching, the main session may inspect the task artifacts needed to make the prompt self-contained. It must then call `push-task` alone in that turn and wait for the user to start the branch.
+Before dispatching, the main session may inspect task artifacts needed to make the prompt self-contained. Call `push-task` as the only tool in its assistant tool batch. `pi-supergsd` 0.2.9 requires both fields:
 
-The branch prompt must start with:
-
-```text
-Active task: .trellis/tasks/<task-dir>
+```json
+{
+  "title": "Short task title",
+  "prompt": "Active task: .trellis/tasks/<task-dir>\nBranch role: trellis-implement\n..."
+}
 ```
 
-It should declare exactly one role on a line such as `Branch role: trellis-implement`; the extension attaches that role instruction file from package-owned `agents/`. Include task artifacts, curated JSONL context, and constraints such as no `git commit`, `git push`, or `git merge`. The role files are for the visible branch only and must not be treated as main-session instructions.
+The prompt's first line must name a usable task directory under `.trellis/tasks` (an active task or a dated archive task containing `task.json` and `prd.md`) and it must contain exactly one valid `Branch role:` line. The extension validates both, then attaches the selected package-owned role file. Include relevant task artifacts, curated JSONL context, and constraints such as no `git commit`, `git push`, or `git merge`.
 
-The user starts the branch with:
-
-```text
-/start-task
-```
-
-and returns the result with:
+The user starts the visible branch, optionally selecting a model, then returns its result:
 
 ```text
+/start-task [model]
 /finish-task
 ```
 
 ## Verification
 
-Useful checks after install/reload:
+Package source checks:
+
+```bash
+npm test
+node --check index.ts
+node -e "import('./index.ts').then(m => { if (typeof m.default !== 'function') throw new Error('invalid extension export') })"
+git diff --check
+```
+
+Optional smoke checks after install/reload from a target Trellis project:
 
 ```bash
 pi list | grep -A2 -B1 'pi-trellis\|pi-supergsd'
 python3 ./.trellis/scripts/task.py current --source
 python3 ./.trellis/scripts/task.py validate <task-dir>
-```
-
-For source validation:
-
-```bash
-node - <<'NODE'
-const { createJiti } = require('/Users/jin/.nvm/versions/node/v24.12.0/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/jiti');
-const jiti = createJiti(process.cwd() + '/');
-const mod = jiti('./index.ts');
-const fn = mod.default || mod;
-if (typeof fn !== 'function') throw new Error('package extension default export is not a function');
-console.log('package extension loads:', typeof fn);
-NODE
 ```

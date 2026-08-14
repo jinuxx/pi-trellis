@@ -16,6 +16,7 @@ interface PiExtensionContext {
   sessionManager?: {
     getSessionId?: () => string;
     getSessionFile?: () => string | undefined;
+    getBranch?: () => unknown[];
   };
   ui?: {
     notify?: (msg: string, type?: "info" | "warning" | "error") => void;
@@ -71,6 +72,22 @@ function readText(path: string): string {
 function exists(path: string): boolean {
   try {
     return existsSync(path);
+  } catch {
+    return false;
+  }
+}
+
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function isFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
   } catch {
     return false;
   }
@@ -230,8 +247,11 @@ function readContextInjectionLimits(root: string): ContextInjectionLimits {
 
 class ContextBudget {
   private used = 0;
+  private readonly maxTotalBytes: number;
 
-  constructor(private readonly maxTotalBytes: number) {}
+  constructor(maxTotalBytes: number) {
+    this.maxTotalBytes = maxTotalBytes;
+  }
 
   hasRoom(size: number): boolean {
     return this.maxTotalBytes <= 0 || this.used + size <= this.maxTotalBytes;
@@ -337,14 +357,12 @@ function materializeArtifact(
 }
 
 // ── Trellis context discovery ─────────────────────────────────────────
-function findRoot(start: string): string {
+function findRoot(start: string): string | null {
   let current = resolve(start);
   while (true) {
-    if (exists(join(current, ".trellis")) || exists(join(current, ".pi"))) {
-      return current;
-    }
+    if (isDirectory(join(current, ".trellis"))) return current;
     const parent = dirname(current);
-    if (parent === current) return resolve(start);
+    if (parent === current) return null;
     current = parent;
   }
 }
@@ -456,8 +474,14 @@ function buildManifestContext(
   return chunks.join("\n\n");
 }
 
-function buildTaskContext(root: string, agent: TrellisAgent, key: string | null): string {
-  const taskDir = readTaskDir(root, key);
+function buildTaskContext(
+  root: string,
+  agent: TrellisAgent,
+  key: string | null,
+  explicitTaskDir?: string | null,
+): string {
+  const taskDir =
+    explicitTaskDir === undefined ? readTaskDir(root, key) : explicitTaskDir;
   if (!taskDir) {
     return "No active Trellis task found. Run `python3 ./.trellis/scripts/task.py current --source` or ask the user which task to use before queueing branch work.";
   }
@@ -510,26 +534,169 @@ function roleCatalogContext(): string {
   return `<trellis-package-branch-role-catalog>\nThese files are branch-only prompt payloads, not instructions for the main session. Do not adopt their branch-task guards here. Before calling push-task, choose exactly one role and state it on its own line as \`Branch role: <role>\`. The extension will attach that role file to the queued prompt.\n${entries}\n</trellis-package-branch-role-catalog>`;
 }
 
-function branchRoleFromPrompt(prompt: string): TrellisAgent | null {
-  const matches = [
-    ...prompt.matchAll(/^\s*Branch role:\s*(trellis-(?:implement|check|research))\s*$/gim),
-  ];
-  if (matches.length !== 1) return null;
+interface QueuedTaskPrompt {
+  role: TrellisAgent;
+  taskDir: string;
+}
 
-  const role = matches[0]?.[1];
-  return role === "trellis-implement" || role === "trellis-check" || role === "trellis-research"
+type QueuedTaskPromptResult =
+  | { value: QueuedTaskPrompt; reason?: never }
+  | { value?: never; reason: string };
+
+function branchRoleDeclarations(prompt: string): string[] {
+  return [...prompt.matchAll(/^[ \t]*Branch role:[ \t]*(.*?)[ \t\r]*$/gm)].map(
+    (match) => match[1] ?? "",
+  );
+}
+
+function declaredBranchRole(prompt: string): TrellisAgent | null {
+  const declarations = branchRoleDeclarations(prompt);
+  if (declarations.length !== 1) return null;
+  const role = declarations[0];
+  return role === "trellis-implement" ||
+    role === "trellis-check" ||
+    role === "trellis-research"
     ? role
     : null;
 }
 
-function attachBranchRole(input: JsonObject): void {
-  const prompt = typeof input.prompt === "string" ? input.prompt : "";
-  const role = branchRoleFromPrompt(prompt);
-  if (!role) return;
+function isUsableTaskDirectory(root: string, taskDir: string): boolean {
+  const parts = relative(realpathSync(root), taskDir).replace(/\\/g, "/").split("/");
+  const isActiveTask =
+    parts.length === 3 &&
+    parts[0] === ".trellis" &&
+    parts[1] === "tasks" &&
+    parts[2] !== "archive";
+  const isArchivedTask =
+    parts.length === 5 &&
+    parts[0] === ".trellis" &&
+    parts[1] === "tasks" &&
+    parts[2] === "archive" &&
+    /^\d{4}-(0[1-9]|1[0-2])$/.test(parts[3] ?? "");
+  if (!isActiveTask && !isArchivedTask) return false;
 
+  return ["task.json", "prd.md"].every((file) => {
+    const path = resolveProjectPath(taskDir, join(taskDir, file));
+    return path !== null && isFile(path);
+  });
+}
+
+function parseQueuedTaskPrompt(root: string, prompt: string): QueuedTaskPromptResult {
+  const firstLine = prompt.split(/\r?\n/, 1)[0] ?? "";
+  const activeTask = firstLine.match(/^Active task:\s+(.+?)\s*$/)?.[1];
+  if (!activeTask) {
+    return {
+      reason: "prompt first line must be `Active task: <path>`",
+    };
+  }
+
+  const declarations = branchRoleDeclarations(prompt);
+  if (declarations.length !== 1) {
+    return {
+      reason: "prompt must contain exactly one `Branch role: <role>` line",
+    };
+  }
+
+  const role = declaredBranchRole(prompt);
+  if (!role) {
+    return {
+      reason:
+        "branch role must be `trellis-implement`, `trellis-check`, or `trellis-research`",
+    };
+  }
+
+  const target = isAbsolute(activeTask) ? activeTask : resolve(root, activeTask);
+  const taskDir = resolveProjectPath(root, target);
+  if (!taskDir || !isDirectory(taskDir) || !isUsableTaskDirectory(root, taskDir)) {
+    return {
+      reason: `active task path must identify a usable task under .trellis/tasks with task.json and prd.md: ${activeTask}`,
+    };
+  }
+
+  return { value: { role, taskDir } };
+}
+
+function attachBranchRole(input: JsonObject, role: TrellisAgent): string | null {
+  const prompt = typeof input.prompt === "string" ? input.prompt : "";
   const roleText = readText(join(PACKAGE_ROOT, "agents", TRELLIS_ROLE_FILES[role])).trim();
-  if (!roleText || prompt.includes(roleText)) return;
-  input.prompt = `${prompt}\n\n--- Package branch role: ${role} ---\n${roleText}`;
+  if (!roleText) return `package role file is unavailable for ${role}`;
+  const attachment = `--- Package branch role: ${role} ---\n${roleText}`;
+  if (!prompt.endsWith(attachment)) input.prompt = `${prompt}\n\n${attachment}`;
+  return null;
+}
+
+function branchEntries(ctx?: PiExtensionContext): unknown[] {
+  try {
+    const entries = ctx?.sessionManager?.getBranch?.();
+    return Array.isArray(entries) ? entries : [];
+  } catch {
+    return [];
+  }
+}
+
+function messageText(message: JsonObject): string | null {
+  if (typeof message.content === "string") return message.content;
+  if (!Array.isArray(message.content)) return null;
+  const text = message.content
+    .filter((part): part is JsonObject => isObj(part) && part.type === "text")
+    .map((part) => (typeof part.text === "string" ? part.text : ""))
+    .join("\n");
+  return text || null;
+}
+
+interface BranchTaskState {
+  isBranch: boolean;
+  prompt: string | null;
+}
+
+function activeBranchTask(ctx?: PiExtensionContext): BranchTaskState {
+  const entries = branchEntries(ctx);
+  let taskStart = -1;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (isObj(entry) && entry.type === "custom" && entry.customType === "task-start") {
+      taskStart = i;
+      break;
+    }
+  }
+  if (taskStart < 0) return { isBranch: false, prompt: null };
+
+  for (let i = taskStart + 1; i < entries.length; i++) {
+    const entry = entries[i];
+    if (!isObj(entry) || entry.type !== "message" || !isObj(entry.message)) continue;
+    if (entry.message.role === "user") {
+      return { isBranch: true, prompt: messageText(entry.message) };
+    }
+  }
+  return { isBranch: true, prompt: null };
+}
+
+interface AssistantToolCall {
+  id: string;
+  name: string;
+}
+
+function assistantToolBatch(
+  toolCallId: string,
+  ctx?: PiExtensionContext,
+): AssistantToolCall[] | null {
+  const entries = branchEntries(ctx);
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const entry = entries[index];
+    if (!isObj(entry) || entry.type !== "message" || !isObj(entry.message)) continue;
+    if (entry.message.role !== "assistant" || !Array.isArray(entry.message.content)) continue;
+    const calls = entry.message.content
+      .filter(
+        (part): part is JsonObject =>
+          isObj(part) &&
+          part.type === "toolCall" &&
+          typeof part.id === "string" &&
+          typeof part.name === "string",
+      )
+      .map((part) => ({ id: part.id as string, name: part.name as string }));
+    if (calls.some((call) => call.id === toolCallId)) return calls;
+  }
+  return null;
 }
 
 // ── Workflow/session prompt injection ─────────────────────────────────
@@ -619,10 +786,10 @@ function branchTaskGuidance(root: string, key: string | null): string {
   return [
     "<trellis-pi-branch-task-guidance>",
     "Trellis is Pi-only in this project. Do not use `trellis_subagent`; that hidden child-process tool has been removed.",
-    "This is the main-session dispatch gate: any task work that changes files, runs checks/fixes, or performs task research MUST be queued through pi-supergsd's `push-task` tool before doing that work, regardless of task size.",
-    "The only exceptions are read-only planning/orientation and a direct user instruction to do the work in the current session. Do not infer a direct-work exception from a task being small or familiar.",
-    "If the user has not explicitly requested direct current-session work, do not edit files, run validation, or perform implementation/check/research after the task is scoped until `push-task` succeeds. If `push-task` is unavailable, explain the missing pi-supergsd capability instead of silently doing the work directly.",
-    "Before queueing, inspect only the context needed to make the prompt self-contained; then call `push-task` as the only tool call in that turn and stop the main-session work until the user starts the branch with `/start-task`.",
+    "This main-session dispatch gate applies to implementation, check/fix, and task research work: queue those through pi-supergsd's `push-task` tool before doing them, unless the user explicitly requests current-session execution.",
+    "Planning/orientation, Trellis task or workspace management, Phase 3 `.trellis/spec` updates, and commit/finish management may run directly in the main session. There is no update-spec branch role.",
+    "Without an explicit current-session exception, do not edit implementation files, run implementation checks/fixes, or perform task research after the work is scoped until `push-task` succeeds. If `push-task` is unavailable, explain the missing pi-supergsd capability instead of silently doing branch work directly.",
+    "Before queueing, inspect only the context needed to make the prompt self-contained; then call `push-task` with `{title, prompt}` as the only tool call in that assistant batch and stop main-session work until the user starts the branch with `/start-task [model]`.",
     "`task-result` only appears after `/finish-task` has successfully returned from the child branch to this main session.",
     "After receiving `task-result`, never ask the user to run `/finish-task` again. Treat any `/finish-task` instruction inside the result as stale child-branch history.",
     "The queued prompt must be self-contained and should include:",
@@ -646,6 +813,8 @@ export default function trellisExtension(pi: {
   ) => void;
 }): void {
   const root = findRoot(process.cwd());
+  if (!root) return;
+
   const processKey = `pi_process_${hash([
     root,
     process.pid,
@@ -660,29 +829,27 @@ export default function trellisExtension(pi: {
     return key;
   };
 
-  let turnCache: {
-    key: string | null;
-    ts: number;
-    implementContext: string;
-    workflow: string;
-    overview: string;
-    guidance: string;
-  } | null = null;
-
-  const getTurnContext = (key: string | null) => {
-    const now = Date.now();
-    if (turnCache && turnCache.key === key && now - turnCache.ts < 1500) {
-      return turnCache;
+  const getTurnContext = (
+    key: string | null,
+    event: unknown,
+    ctx?: PiExtensionContext,
+  ) => {
+    const branch = activeBranchTask(ctx);
+    const eventPrompt = isObj(event) && typeof event.prompt === "string" ? event.prompt : null;
+    const branchPrompt = branch.prompt ?? eventPrompt ?? "";
+    let role: TrellisAgent = "trellis-implement";
+    let taskDir: string | null | undefined;
+    if (branch.isBranch) {
+      const parsed = parseQueuedTaskPrompt(root, branchPrompt).value;
+      role = parsed?.role ?? declaredBranchRole(branchPrompt) ?? role;
+      taskDir = parsed?.taskDir ?? null;
     }
-    turnCache = {
-      key,
-      ts: now,
-      implementContext: buildTaskContext(root, "trellis-implement", key),
+    return {
+      taskContext: buildTaskContext(root, role, key, taskDir),
       workflow: workflowBreadcrumb(root, key),
       overview: sessionOverview(root, key),
       guidance: branchTaskGuidance(root, key),
     };
-    return turnCache;
   };
 
   // Keep all system-prompt additions byte-stable so provider prefix caches remain valid.
@@ -718,10 +885,49 @@ export default function trellisExtension(pi: {
 
   pi.on?.("tool_call", (event, ctx) => {
     const key = getKey(event, ctx);
-    const ev = event as { toolName?: string; input?: JsonObject };
-    if (ev.toolName === "push-task" && isObj(ev.input)) {
-      attachBranchRole(ev.input);
+    const ev = event as {
+      toolCallId?: string;
+      toolName?: string;
+      input?: JsonObject;
+    };
+    const batch =
+      typeof ev.toolCallId === "string" ? assistantToolBatch(ev.toolCallId, ctx) : null;
+    if (!batch) {
+      return {
+        block: true,
+        reason: "cannot verify the current assistant tool batch",
+      };
     }
+    if (batch.some((call) => call.name === "push-task") && batch.length !== 1) {
+      return {
+        block: true,
+        reason: "push-task must be the only tool call in its assistant tool batch",
+      };
+    }
+
+    if (ev.toolName === "push-task") {
+      if (
+        !isObj(ev.input) ||
+        typeof ev.input.title !== "string" ||
+        typeof ev.input.prompt !== "string"
+      ) {
+        return {
+          block: true,
+          reason: "push-task requires string `{title, prompt}` arguments",
+        };
+      }
+      const parsed = parseQueuedTaskPrompt(root, ev.input.prompt);
+      if (!parsed.value) {
+        return {
+          block: true,
+          reason: `invalid Trellis branch task: ${parsed.reason}`,
+        };
+      }
+      const roleError = attachBranchRole(ev.input, parsed.value.role);
+      if (roleError) return { block: true, reason: roleError };
+      return;
+    }
+
     if (
       ev.toolName === "bash" &&
       isObj(ev.input) &&
@@ -741,9 +947,9 @@ export default function trellisExtension(pi: {
     const contextKey = getKey(event, ctx);
     const key = contextKey ?? "default";
     const cur = (event as { systemPrompt?: string }).systemPrompt ?? "";
-    const turn = getTurnContext(contextKey);
+    const turn = getTurnContext(contextKey, event, ctx);
     const startup = getStartupContext(contextKey, turn);
-    const { implementContext: freshTaskContext, workflow, overview, guidance: freshGuidance } =
+    const { taskContext: freshTaskContext, workflow, overview, guidance: freshGuidance } =
       turn;
 
     let taskContext = taskContextSnapshot.get(key);
@@ -761,15 +967,19 @@ export default function trellisExtension(pi: {
     }
 
     const updates: string[] = [];
+    const recovering = compactedContexts.has(key);
     const runtimeContext = [workflow, overview].filter(Boolean).join("\n\n");
     if (
       runtimeContext &&
-      (compactedContexts.has(key) || runtimeContext !== lastSentRuntimeContext.get(key))
+      (recovering || runtimeContext !== lastSentRuntimeContext.get(key))
     ) {
       lastSentRuntimeContext.set(key, runtimeContext);
       updates.push(runtimeContext);
     }
-    if (freshTaskContext !== lastSentTaskContext.get(key)) {
+    if (
+      freshTaskContext !== lastSentTaskContext.get(key) ||
+      (recovering && freshTaskContext !== taskContext)
+    ) {
       lastSentTaskContext.set(key, freshTaskContext);
       updates.push(
         "<trellis-task-context-update>\nTask context changed on disk. This supersedes the Trellis Task Context in the system prompt.\n\n" +
@@ -777,7 +987,10 @@ export default function trellisExtension(pi: {
           "\n</trellis-task-context-update>",
       );
     }
-    if (freshGuidance !== lastSentGuidance.get(key)) {
+    if (
+      freshGuidance !== lastSentGuidance.get(key) ||
+      (recovering && freshGuidance !== guidance)
+    ) {
       lastSentGuidance.set(key, freshGuidance);
       updates.push(
         "<trellis-branch-guidance-update>\nBranch guidance changed. This supersedes the branch guidance in the system prompt.\n\n" +
@@ -808,24 +1021,15 @@ export default function trellisExtension(pi: {
     if (!compactedContexts.has(key)) return;
 
     const messages = (event as { messages?: JsonObject[] }).messages ?? [];
-    if (
-      messages.some(
-        (message) =>
-          message.role === "custom" && message.customType === "trellis-runtime-context",
-      )
-    ) {
-      return;
-    }
-
-    const turn = getTurnContext(contextKey);
+    const turn = getTurnContext(contextKey, event, ctx);
     const taskContext = taskContextSnapshot.get(key) ?? "";
     const guidance = guidanceSnapshot.get(key) ?? "";
     const recoveryParts = [
       [turn.workflow, turn.overview].filter(Boolean).join("\n\n"),
     ];
-    if (turn.implementContext !== taskContext) {
+    if (turn.taskContext !== taskContext) {
       recoveryParts.push(
-        `<trellis-task-context-update>\n${turn.implementContext}\n</trellis-task-context-update>`,
+        `<trellis-task-context-update>\n${turn.taskContext}\n</trellis-task-context-update>`,
       );
     }
     if (turn.guidance !== guidance) {
@@ -833,8 +1037,24 @@ export default function trellisExtension(pi: {
         `<trellis-branch-guidance-update>\n${turn.guidance}\n</trellis-branch-guidance-update>`,
       );
     }
+    const requiredRecovery = [
+      recoveryParts[0],
+      turn.taskContext !== taskContext ? turn.taskContext : "",
+      turn.guidance !== guidance ? turn.guidance : "",
+    ].filter(Boolean);
     const recovery = recoveryParts.filter(Boolean).join("\n\n");
     if (!recovery) return;
+    if (
+      messages.some((message) => {
+        if (message.role !== "custom" || message.customType !== "trellis-runtime-context") {
+          return false;
+        }
+        const content = messageText(message) ?? "";
+        return requiredRecovery.every((part) => content.includes(part));
+      })
+    ) {
+      return;
+    }
 
     return {
       messages: [
@@ -843,6 +1063,7 @@ export default function trellisExtension(pi: {
           role: "custom",
           customType: "trellis-runtime-context",
           content: recovery,
+          display: false,
           timestamp: Date.now(),
         },
       ],

@@ -43,7 +43,7 @@ Use a concise title from the user's request. Use a slug without a date prefix. `
 
 ## Main-session dispatch boundary
 
-Planning, clarification, task-artifact authoring, and read-only repository orientation stay in the main session. After the user approves the final planning summary and execution begins, the main session must queue any implementation, check/fix, or task-scoped research through `pi-supergsd`'s `push-task` before doing that work, regardless of size. The only direct-work exception is an explicit user instruction to work in the current session. If `push-task` is unavailable, report that capability gap rather than silently executing the branch work in the main session.
+Planning, clarification, task/workspace artifact authoring, and read-only repository orientation stay in the main session. After approval, queue implementation, check/fix, or task-scoped research through `pi-supergsd`'s `push-task`. Phase 3 `.trellis/spec/` updates and commit/finish management return to the main session; there is no update-spec branch role. Direct implementation/check/research requires an explicit user instruction to work in the current session. If `push-task` is unavailable, report that capability gap.
 
 ## Planning Flow
 

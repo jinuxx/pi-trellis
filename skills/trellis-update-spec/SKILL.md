@@ -9,6 +9,8 @@ When you learn something valuable (from debugging, implementing, or discussion),
 
 **Timing**: After completing a task, fixing a bug, or discovering a new pattern
 
+During workflow Phase 3.3, run this skill directly in the main session. `trellis-update-spec` is a skill, not a branch role; do not queue a fictional update-spec task.
+
 ---
 
 ## Code-Spec First Rule (CRITICAL)

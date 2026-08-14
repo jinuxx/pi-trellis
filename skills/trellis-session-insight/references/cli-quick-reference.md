@@ -1,13 +1,15 @@
 # trellis mem Pi Quick Reference
 
-Use `trellis mem` only for local Pi Agent session history in this Pi-only package.
+Use a separately installed global Trellis CLI's `trellis mem` only for local Pi Agent session history. `pi-trellis` does not include CLI/core.
 
 ## Common commands
 
 ```bash
 trellis mem list --limit 10
 trellis mem search "keyword" --limit 20
-trellis mem show <session-id> --limit 200
+trellis mem context <session-id> --turns 3 --around 2
+trellis mem extract <session-id> --phase all
+trellis mem projects
 ```
 
 ## Scope

@@ -11,7 +11,7 @@ Comprehensive quality verification for recently written code. Combines spec comp
 
 ## Main-session dispatch gate
 
-If this skill is invoked in the main Pi session, do not run the checks or fix files directly. Queue a `trellis-check` branch through `pi-supergsd`'s `push-task` first, including the branch role prompt and the relevant task context. This applies regardless of diff size. Only read-only preparation or an explicit user instruction to review/fix in the current session is an exception. The review steps below apply after `/start-task` in the visible check branch.
+If this skill is invoked in the main Pi session, queue a `trellis-check` branch through `pi-supergsd`'s `push-task`, including the branch role and relevant task context. Only read-only preparation or an explicit user instruction to review/fix in the current session is an exception. The review steps below apply after `/start-task [model]` in the visible check branch. Phase 3 `.trellis/spec/` updates and commit/finish management run in the main session after the branch returns.
 
 If `push-task` is unavailable, report the missing capability rather than silently reviewing or fixing the main working tree.
 

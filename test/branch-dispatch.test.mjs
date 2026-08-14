@@ -8,14 +8,15 @@ const guidanceStart = source.indexOf("function branchTaskGuidance");
 const guidanceEnd = source.indexOf("// ── Extension", guidanceStart);
 const guidance = source.slice(guidanceStart, guidanceEnd);
 
-test("main-session guidance requires branch dispatch", () => {
+test("main-session guidance matches the Phase 3 dispatch boundary", () => {
   assert.notEqual(guidanceStart, -1);
   assert.notEqual(guidanceEnd, -1);
-  assert.match(guidance, /MUST be queued through pi-supergsd's `push-task` tool/);
-  assert.match(guidance, /regardless of task size/);
-  assert.match(guidance, /explicitly requested direct current-session work/);
+  assert.match(guidance, /implementation, check\/fix, and task research work/);
+  assert.match(guidance, /explicitly requests current-session execution/);
+  assert.match(guidance, /Phase 3 `\.trellis\/spec` updates/);
+  assert.match(guidance, /There is no update-spec branch role/);
   assert.match(guidance, /push-task` is unavailable/);
-  assert.match(guidance, /only tool call in that turn/);
+  assert.match(guidance, /only tool call in that assistant batch/);
 });
 
 test("task-result guidance prevents repeated finish-task prompts", () => {
@@ -28,11 +29,8 @@ test("task-result guidance prevents repeated finish-task prompts", () => {
 });
 
 test("main-session guidance exposes only the branch role catalog", () => {
-  assert.match(source, /function roleCatalogContext/);
   assert.match(source, /trellis-package-branch-role-catalog/);
   assert.match(guidance, /roleCatalogContext\(\)/);
-  assert.match(source, /ev\.toolName === "push-task"/);
-  assert.match(source, /attachBranchRole\(ev\.input\)/);
   assert.doesNotMatch(source, /roleDefinitionsContext/);
   assert.doesNotMatch(guidance, /package role definitions are injected below/);
 });
@@ -64,7 +62,7 @@ test("all visible branch roles constrain final responses", () => {
   }
 });
 
-test("workflow-facing resources repeat the dispatch gate", () => {
+test("workflow-facing resources repeat the Phase 3 boundary", () => {
   for (const path of [
     "README.md",
     "skills/trellis-before-dev/SKILL.md",
@@ -76,6 +74,7 @@ test("workflow-facing resources repeat the dispatch gate", () => {
   ]) {
     const content = read(path);
     assert.match(content, /push-task/);
-    assert.match(content, /regardless of (task )?size|regardless of diff size/);
+    assert.match(content, /\.trellis\/spec/);
+    assert.doesNotMatch(content, /regardless of (task )?size|regardless of diff size/);
   }
 });
