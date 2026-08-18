@@ -13,10 +13,10 @@ Source-installable package for local path validation and GitHub install. It is *
 This project is adapted from [`mindfold-ai/Trellis`](https://github.com/mindfold-ai/Trellis). The current upstream baseline is recorded in `package.json` under `trellisUpstream`:
 
 - Repository: `https://github.com/mindfold-ai/Trellis.git`
-- Package version: `0.6.14` (kept aligned with the upstream baseline)
-- Tag: [`v0.6.14`](https://github.com/mindfold-ai/Trellis/tree/v0.6.14)
-- Upstream version: `0.6.14`
-- Recorded at: `2026-08-08`
+- Package version: `0.6.15` (kept aligned with the upstream baseline)
+- Tag: [`v0.6.15`](https://github.com/mindfold-ai/Trellis/tree/v0.6.15)
+- Upstream version: `0.6.15`
+- Recorded at: `2026-08-18`
 
 When upstream changes, compare the new upstream tag range from this baseline, analyze which changes still apply to the Pi-only package boundary, and selectively port the relevant updates instead of merging blindly.
 
@@ -68,6 +68,13 @@ Pi clones git packages and runs `npm install` when `package.json` exists.
 - `pi.prompts`: `./prompts`
 
 Role definitions live in package-owned `agents/` as branch-only prompt payloads. The extension injects only their file catalog into the main session and, when a queued prompt declares `Branch role: ...`, attaches the selected role file to that branch prompt.
+
+## Selected v0.6.15 updates
+
+- Requires non-trivial implementation work to state its change boundary before editing, without adding ceremony to small changes.
+- Tightens check behavior: mechanical, local issues may be fixed directly; design judgments, public interfaces, module boundaries, and out-of-scope changes are reported instead of rewritten silently.
+- Keeps active-task pointers project-root-bound. The package extension already enforced this boundary, so no additional runtime mechanism was needed.
+- Excludes upstream CLI/core, DSH, Kimi, OpenCode, OMP, marketplace, and other non-Pi platform changes.
 
 ## Selected v0.6.14 updates
 

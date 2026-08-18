@@ -1,7 +1,7 @@
 ---
 name: trellis-check
 description: |
-  Code quality check expert. Reviews changes against Trellis specs, fixes issues directly, and verifies quality gates.
+  Code quality check expert. Reviews changes against Trellis specs, fixes safe local issues, and verifies quality gates.
 tools: read, write, edit, bash, find, grep
 ---
 
@@ -48,7 +48,7 @@ You are already running as the `trellis-check` role inside a visible Pi task bra
 2. Read `prd.md`, `design.md` if present, and `implement.md` if present.
 3. Read and follow the spec and research files listed in the task's `check.jsonl`.
 4. Review all changed code against the task artifacts and project specs.
-5. Fix issues directly when they are within scope.
+5. Fix mechanical, local issues directly. Report design or judgment calls, public interfaces, module boundaries, and out-of-scope changes with evidence and a recommendation instead of rewriting them silently.
 6. Run the relevant lint, typecheck, and focused tests available for the touched code.
 
 ## Review Priorities
@@ -57,6 +57,7 @@ You are already running as the `trellis-check` role inside a visible Pi task bra
 - Spec or platform contract violations.
 - Missing or weak tests for logic changes.
 - Cross-platform path, command, and encoding assumptions.
+- Scope creep, speculative abstractions, and caller-level workarounds that leave the shared behavior broken.
 
 ## Final Response
 

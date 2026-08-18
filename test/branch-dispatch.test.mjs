@@ -62,6 +62,21 @@ test("all visible branch roles constrain final responses", () => {
   }
 });
 
+test("v0.6.15 guidance keeps implementation and fixes in scope", () => {
+  const beforeDev = read("skills/trellis-before-dev/SKILL.md");
+  assert.match(beforeDev, /state the change boundary before writing code/);
+  assert.match(beforeDev, /Do not widen the change on your own/);
+
+  const checkSkill = read("skills/trellis-check/SKILL.md");
+  assert.match(checkSkill, /### Scope Discipline/);
+  assert.match(checkSkill, /Mechanical and local/);
+  assert.match(checkSkill, /changing a public interface/);
+
+  const checkRole = read("agents/trellis-check.md");
+  assert.match(checkRole, /Fix mechanical, local issues directly/);
+  assert.match(checkRole, /public interfaces, module boundaries/);
+});
+
 test("workflow-facing resources repeat the Phase 3 boundary", () => {
   for (const path of [
     "README.md",
