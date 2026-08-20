@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "templates": [
+    {
+      "id": "java-backend",
+      "type": "spec",
+      "name": "通用 Java 后端规范",
+      "description": "从多个 Java/MyBatis 后端项目提取的通用开发规范。",
+      "path": "marketplace/specs/java-backend",
+      "tags": ["java", "spring", "mybatis-plus", "backend"]
+    }
+  ]
+}
