@@ -15,7 +15,7 @@ Controller → Service → Repository（必要时）→ Mapper → Database
 - **Controller**：声明路由和 API 文档，绑定请求参数，执行结构性输入校验和权限注解，调用 Service 并返回项目统一响应。
 - **Service**：拥有业务流程、事务边界、资源存在性校验、权限/数据范围校验和跨持久化操作。
 - **Repository**：仅在多个 Mapper 操作需要组合，或持久化需要 Redis/外部协调时使用；简单 CRUD 不额外增加 Repository。
-- **Mapper**：执行标准 CRUD、参数化查询和约定的 XML SQL，不承载业务规则。
+- **Mapper**：Java 接口只声明方法和参数；标准 CRUD 可复用基类，所有自定义 SQL 写在对应 Mapper XML，不承载业务规则。
 - **Entity/PO**：映射数据库记录；持久化字段、逻辑删除字段和审计字段遵循项目已有基类与注解。
 - **Request/DTO/VO**：分别表达外部输入、跨层传输和 API 输出；不要把数据库字段和公开响应契约混为一体。
 - **Common/Base**：只放稳定、跨模块复用的异常、响应、基础实体、工具和基础设施。

@@ -12,22 +12,15 @@
 - 计算字段、关联展示字段和其他非持久化属性必须使用项目约定的非持久化标记。
 - 不要为了方便修改已被接口、脚本或其他模块依赖的字段名。
 
-## 查询规则
+## MyBatis 查询规则
 
-- 优先使用项目已有的 BaseMapper、Mapper 扩展和 Lambda/参数化 Wrapper；不要重复实现已有默认方法。
-- 所有外部输入使用参数绑定、Wrapper 或 Mapper 参数，禁止字符串拼接 SQL。
-- 简单查询使用注解或 Wrapper；复杂聚合、动态条件、批量 `IN` 和多表查询放在约定的 Mapper XML 中。
-- 手写 SQL 必须显式检查逻辑删除、租户和数据范围条件；不要假设 ORM 会替 XML 自动补条件。
-- 列表接口保持稳定排序和分页；复用项目统一分页参数、默认值和上限。
-- 空 `IN` 列表必须在 Service/Repository 提前处理，不能生成无效或全表查询。
-
-## 多表查询与分页性能
-
-- 项目存在 MyBatis 或 MyBatis-Plus 时，多表关联任务在满足性能的前提下优先在 Mapper/Mapper XML 中编写 SQL 联查，不要先分别查询再在内存中拼接结果。
-- 允许使用 `JOIN`，但单条 SQL 最多关联 3 张表；超过 3 张表时必须重新拆分查询、建立专用查询模型或先取得必要主键后再分步查询，并说明性能依据。
-- 绝对禁止逻辑分页。分页必须下推到数据库，使用 MyBatis-Plus `Page`/`IPage` 或项目现有的物理分页机制，让 SQL 生成 `LIMIT`/`OFFSET`（或等价数据库分页语句）。禁止先查出全量数据后使用 `subList`、`stream().skip/limit` 等方式在内存中分页。
-- 能够在 SQL 中表达的筛选条件必须写入 `WHERE`、`JOIN ... ON` 或参数化查询条件中；禁止先查询全部记录，再在 Java 内存中比较、过滤或判断。
-- 联查、过滤和分页字段必须检查索引、执行计划和返回数据量；不能仅因为 SQL 能执行就忽略性能验证。
+- 使用 MyBatis/MyBatis-Plus 时，标准单表 CRUD 可复用 `BaseMapper`；自定义查询必须由 Mapper 接口声明，并写入该 Mapper 对应的 XML。
+- Controller、Service、Repository 和 Mapper Java 接口中禁止写 SQL 字符串、SQL 拼接或 `@Select`/`@Update` 等 SQL 注解；SQL 统一放在对应 Mapper XML。
+- 多表关联优先在 Mapper XML 中使用 SQL 联查；允许 `JOIN`，但单条 SQL 最多关联 3 张表。超过 3 张表时拆分查询并验证执行计划。
+- 能在 SQL 中完成的条件必须写入 XML 的 `WHERE`/`ON` 条件；禁止全量查出后在 Java 内存中比较、过滤或分页。
+- 分页必须使用数据库物理分页，复用 `Page`/`IPage` 或项目现有机制，让 SQL 生成 `LIMIT`/`OFFSET`（或等价语句）；禁止 `subList`、`stream().skip/limit` 等逻辑分页。
+- XML 使用 `#{}` 或其他参数绑定方式，禁止把外部输入拼接进 SQL。
+- XML 查询必须显式处理逻辑删除、租户和数据范围；空 `IN` 列表提前处理，避免无效或全表查询。
 
 ## 事务与数据范围
 
