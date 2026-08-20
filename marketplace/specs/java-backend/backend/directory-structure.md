@@ -25,7 +25,7 @@ Controller → Service → Repository（必要时）→ Mapper → Database
 - 先确认代码属于哪个 Maven/module，再确认目标 feature/package。
 - 按现有项目选择“按业务模块分包”或“按技术层分包”，不要引入第三种组织方式。
 - 一个类不需要的空层不要创建；只有实际存在职责时才建立 `repository`、`job`、`dto` 或 `vo`。
-- Mapper XML 放在项目约定的位置，并确认 `pom.xml` 资源配置和 `mapper-locations` 能加载它。
+- Mapper XML 必须放在对应 `Mapper.java` 同目录下的 `xml/` 子目录，例如 `mapper/UserMapper.java` 对应 `mapper/xml/UserMapper.xml`；同时确认 `pom.xml` 资源配置和 `mapper-locations` 能加载它。
 - 测试放在对应模块的测试目录，保持包路径与被测代码一致。
 
 ## 命名与风格

@@ -14,7 +14,7 @@
 
 ## MyBatis 查询规则
 
-- 使用 MyBatis/MyBatis-Plus 时，标准单表 CRUD 可复用 `BaseMapper`；自定义查询必须由 Mapper 接口声明，并写入该 Mapper 对应的 XML。
+- 使用 MyBatis/MyBatis-Plus 时，标准单表 CRUD 可复用 `BaseMapper`；自定义查询必须由 Mapper 接口声明，并写入该 Mapper 对应的 XML。XML 必须位于 `Mapper.java` 同目录下的 `xml/` 子目录，例如 `mapper/UserMapper.java` 对应 `mapper/xml/UserMapper.xml`。
 - Controller、Service、Repository 和 Mapper Java 接口中禁止写 SQL 字符串、SQL 拼接或 `@Select`/`@Update` 等 SQL 注解；SQL 统一放在对应 Mapper XML。
 - 多表关联优先在 Mapper XML 中使用 SQL 联查；允许 `JOIN`，但单条 SQL 最多关联 3 张表。超过 3 张表时拆分查询并验证执行计划。
 - 能在 SQL 中完成的条件必须写入 XML 的 `WHERE`/`ON` 条件；禁止全量查出后在 Java 内存中比较、过滤或分页。
